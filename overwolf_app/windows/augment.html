@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Augment Picker</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; background: transparent; overflow: hidden; }
+    iframe { width: 100%; height: 100%; border: none; background: transparent; }
+  </style>
+</head>
+<body>
+  <iframe id="app" allowtransparency="true"></iframe>
+
+  <script src="../app-config.js"></script>
+  <script src="app-loader.js"></script>
+  <script>
+    let winId = null;
+    overwolf.windows.getCurrentWindow((res) => {
+      if (res.status === 'success') winId = res.window.id;
+    });
+    window.TFTAdvisorLoader.bind({ page: 'augment', stageStorageKey: 'tft_popup_stage_augment' });
+    window.addEventListener('message', (ev) => {
+      if (!ev.data || !ev.data.type) return;
+      if (ev.data.type === 'ow:close' || ev.data.type === 'ow:minimize') {
+        if (winId) overwolf.windows.minimize(winId, () => {});
+      }
+    });
+  </script>
+</body>
+</html>

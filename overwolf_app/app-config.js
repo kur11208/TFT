@@ -1,0 +1,22 @@
+(function () {
+  function readStorage(key) {
+    try {
+      return localStorage.getItem(key);
+    } catch {
+      return null;
+    }
+  }
+
+  var backendBase = readStorage("tft_backend_base") || "http://localhost:8000";
+  var frontendOverride = readStorage("tft_frontend_base");
+  var candidates = frontendOverride
+    ? [frontendOverride, "http://localhost:5173", "http://localhost:8000"]
+    : ["http://localhost:5173", "http://localhost:8000"];
+
+  window.__TFT_ADVISOR_CONFIG__ = {
+    backendBase: backendBase.replace(/\/+$/, ""),
+    frontendCandidates: candidates.map(function (value) {
+      return value.replace(/\/+$/, "");
+    }),
+  };
+})();

@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>TFT Advisor</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; background: transparent; overflow: visible; }
+    iframe { width: 100%; height: 100%; border: none; background: transparent; }
+  </style>
+</head>
+<body>
+  <iframe id="app" allowtransparency="true"></iframe>
+
+  <script src="../app-config.js"></script>
+  <script src="app-loader.js"></script>
+  <script>
+    let winId = null;
+    overwolf.windows.getCurrentWindow((res) => {
+      if (res.status === 'success') winId = res.window.id;
+    });
+
+    window.TFTAdvisorLoader.bind({ page: 'overlay' });
+
+    // Relay postMessages from the React iframe to Overwolf APIs
+    window.addEventListener('message', (ev) => {
+      if (!ev.data || !ev.data.type) return;
+      switch (ev.data.type) {
+        case 'ow:minimize':
+        case 'ow:close':
+          if (winId) overwolf.windows.minimize(winId, () => {});
+          break;
+        case 'ow:dragMove':
+          if (winId) overwolf.windows.dragMove(winId);
+          break;
+        case 'ow:showAugment':
+          try { localStorage.setItem('tft_popup_stage_augment', ev.data.stage || ''); } catch {}
+          overwolf.windows.sendMessage('background', 'msg', { type: 'show_augment' }, () => {});
+          break;
+        case 'ow:hideAugment':
+          overwolf.windows.sendMessage('background', 'msg', { type: 'hide_augment' }, () => {});
+          break;
+        case 'ow:showForge':
+          overwolf.windows.sendMessage('background', 'msg', { type: 'show_forge' }, () => {});
+          break;
+        case 'ow:hideForge':
+          overwolf.windows.sendMessage('background', 'msg', { type: 'hide_forge' }, () => {});
+          break;
+        case 'ow:showGods':
+          try { localStorage.setItem('tft_popup_stage_gods', ev.data.stage || ''); } catch {}
+          overwolf.windows.sendMessage('background', 'msg', { type: 'show_gods' }, () => {});
+          break;
+        case 'ow:hideGods':
+          overwolf.windows.sendMessage('background', 'msg', { type: 'hide_gods' }, () => {});
+          break;
+        case 'ow:showGodBoon':
+          overwolf.windows.sendMessage('background', 'msg', { type: 'show_godboon' }, () => {});
+          break;
+        case 'ow:hideGodBoon':
+          overwolf.windows.sendMessage('background', 'msg', { type: 'hide_godboon' }, () => {});
+          break;
+      }
+    });
+  </script>
+</body>
+</html>

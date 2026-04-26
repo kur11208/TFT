@@ -1,0 +1,36 @@
+[
+  { "name": "ダーク・スター ハート",       "tier": "Silver",    "keywords": ["ダーク・スター", "スナイパー", "AD", "Dark Star", "Sniper"],            "desc": "ダーク・スターユニット全体に+15ADと攻撃速度+10%" },
+  { "name": "ダーク・スター クレスト",     "tier": "Gold",      "keywords": ["ダーク・スター", "スナイパー", "クリティカル", "Dark Star", "Crit"],    "desc": "ダーク・スターユニット全体に+25ADとクリティカル+15%" },
+  { "name": "ダーク・スター クラウン",     "tier": "Prismatic", "keywords": ["ダーク・スター", "スナイパー", "AD", "Dark Star"],                      "desc": "ダーク・スターユニット+40AD。ブラックホール発生が早まる" },
+
+  { "name": "ミープル ハート",             "tier": "Silver",    "keywords": ["ミープル", "Meeple"],                                                   "desc": "ミープルユニット全体に+15APとミープルパワー+20" },
+  { "name": "ミープル クレスト",           "tier": "Gold",      "keywords": ["ミープル", "Meeple"],                                                   "desc": "ミープルユニット全体に+25APとミープルパワー+40" },
+  { "name": "ミープル クラウン",           "tier": "Prismatic", "keywords": ["ミープル", "Meeple"],                                                   "desc": "チームにミープルユニット+1（コピー）追加" },
+
+  { "name": "スペース・グルーブ ハート",   "tier": "Silver",    "keywords": ["スペース・グルーブ", "ヴァンガード", "タンク", "Space Groove", "Vanguard"], "desc": "スペース・グルーブユニット全体に+200HPとグルーブ-1体起動" },
+  { "name": "スペース・グルーブ クレスト", "tier": "Gold",      "keywords": ["スペース・グルーブ", "ヴァンガード", "Space Groove"],                    "desc": "スペース・グルーブユニット全体に+350HPと回復+5%/s" },
+
+  { "name": "サイオニック ハート",         "tier": "Silver",    "keywords": ["サイオニック", "AP", "魔力", "Psionic", "Ability Power"],                "desc": "サイオニックユニットにPsi-Mod（AP効果強化）を1つ追加" },
+  { "name": "サイオニック クレスト",       "tier": "Gold",      "keywords": ["サイオニック", "AP", "ビクター", "Psionic", "Viktor"],                   "desc": "サイオニックユニットにPsi-Mod×2追加。ビクターの最終形態が強化" },
+
+  { "name": "N.O.V.A. ハート",            "tier": "Silver",    "keywords": ["N.O.V.A.", "プリモルディアン", "リロール", "Primordian", "Reroll"],       "desc": "N.O.V.A.ユニットにパワーサージ回数+1" },
+  { "name": "N.O.V.A. クレスト",          "tier": "Gold",      "keywords": ["N.O.V.A.", "キンドレッド", "アカリ", "Kindred", "Akali"],                 "desc": "N.O.V.A.ユニットにパワーサージ+2とAD+20" },
+
+  { "name": "スターゲイザー ハート",       "tier": "Silver",    "keywords": ["スターゲイザー", "リロール", "Stargazer", "Reroll"],                      "desc": "スターゲイザーユニット全体に+15AD/APと星座ボーナス加速" },
+  { "name": "スターゲイザー クレスト",     "tier": "Gold",      "keywords": ["スターゲイザー", "リロール", "クリティカル", "Stargazer", "Crit"],         "desc": "スターゲイザーユニット全体に+25AD/APとクリティカル+10%" },
+
+  { "name": "スナイパー ハート",           "tier": "Silver",    "keywords": ["スナイパー", "AD", "ダーク・スター", "攻撃", "Sniper", "Dark Star"],      "desc": "スナイパーユニット全体に遠距離ダメージ+15%" },
+  { "name": "スナイパー クレスト",         "tier": "Gold",      "keywords": ["スナイパー", "クリティカル", "ダーク・スター", "Sniper", "Crit"],          "desc": "スナイパーユニット全体に遠距離ダメージ+25%とクリティカル+10%" },
+
+  { "name": "ヴァンガード ハート",         "tier": "Silver",    "keywords": ["ヴァンガード", "タンク", "スペース・グルーブ", "Vanguard", "Tank"],       "desc": "ヴァンガードユニット全体に+200HPと鎧+20" },
+  { "name": "ヴァンガード クレスト",       "tier": "Gold",      "keywords": ["ヴァンガード", "タンク", "シールド", "Vanguard", "Shield"],               "desc": "ヴァンガードユニット全体に+350HPと戦闘開始時シールド強化" },
+
+  { "name": "後期スペシャリスト",          "tier": "Silver",    "keywords": ["経済", "Fast 9", "ミープル", "後期", "Meeple", "Late Game", "Economy"],    "desc": "Lv9への経験値コスト-4。Fast 9構成で特に強力" },
+  { "name": "シルバースプーン",            "tier": "Gold",      "keywords": ["経済", "Gold", "AD", "AP", "Economy"],                                    "desc": "ゲーム開始時に完成アイテム1つを無作為で獲得" },
+  { "name": "パンドラのアイテム",          "tier": "Silver",    "keywords": ["経済", "リロール", "Economy", "Reroll"],                                  "desc": "毎ラウンド開始時に保有アイテムをランダムに再配布" },
+  { "name": "大勝利",                      "tier": "Prismatic", "keywords": ["リロール", "経済", "Gold", "Reroll", "Economy"],                           "desc": "3つ星完成ごとにGold+3と追加リロール" },
+  { "name": "ジュエルド・ロータス",        "tier": "Gold",      "keywords": ["クリティカル", "AD", "AP", "スナイパー", "Crit", "Sniper"],                "desc": "全ユニットにクリティカル率+15%" },
+  { "name": "忍耐の研究",                  "tier": "Silver",    "keywords": ["経済", "AP", "サイオニック", "Economy", "Psionic"],                        "desc": "5ラウンドごとにGold+2とAP+5を全ユニットに付与" },
+  { "name": "サイバネティック強化",        "tier": "Silver",    "keywords": ["タンク", "ヴァンガード", "HP", "Tank", "Vanguard"],                        "desc": "アイテム装備ユニット全員に+200HP" },
+  { "name": "ローリングデイズ",            "tier": "Gold",      "keywords": ["リロール", "スターゲイザー", "N.O.V.A.", "Reroll", "Stargazer"],           "desc": "ショップリロール-1コスト（最低0G）" }
+]

@@ -1,0 +1,19 @@
+[
+  { "name": "ダーク・スター",      "breakpoints": [2, 4, 6, 9],    "type": "origin"    },
+  { "name": "ミープル",            "breakpoints": [3, 5, 7, 10],   "type": "origin"    },
+  { "name": "N.O.V.A.",            "breakpoints": [2, 5],           "type": "origin"    },
+  { "name": "プリモルディアン",    "breakpoints": [2, 3, 5],        "type": "origin"    },
+  { "name": "サイオニック",        "breakpoints": [2, 4],           "type": "origin"    },
+  { "name": "スペース・グルーブ",  "breakpoints": [1, 3, 5, 7, 10], "type": "origin"    },
+  { "name": "スターゲイザー",      "breakpoints": [3, 5, 7],        "type": "origin"    },
+  { "name": "アービター",          "breakpoints": [2, 3],           "type": "origin"    },
+  { "name": "タイムブレイカー",    "breakpoints": [2, 3, 4],        "type": "origin"    },
+  { "name": "シェパード",          "breakpoints": [3, 5, 7],        "type": "origin"    },
+
+  { "name": "バスティオン",        "breakpoints": [2, 4, 6],        "type": "frontline" },
+  { "name": "チャレンジャー",      "breakpoints": [2, 4, 6],        "type": "mixed"     },
+  { "name": "マローダー",          "breakpoints": [2, 4],           "type": "frontline" },
+  { "name": "スナイパー",          "breakpoints": [2, 3, 4, 5],     "type": "backline"  },
+  { "name": "ヴァンガード",        "breakpoints": [2, 4, 6],        "type": "frontline" },
+  { "name": "ヴォイジャー",        "breakpoints": [2, 4, 6],        "type": "backline"  }
+]

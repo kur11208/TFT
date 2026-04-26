@@ -1,0 +1,41 @@
+[
+  { "id": "rod",    "name": "ニードレスリー・ラージ・ロッド", "short": "ロッド",    "en": "Needlessly Large Rod", "component": true,  "stat": "AP",    "keywords": ["AP", "ロッド", "Rod"] },
+  { "id": "tear",   "name": "ティア・オブ・ゴッデス",         "short": "涙",        "en": "Tear of the Goddess",  "component": true,  "stat": "マナ",  "keywords": ["マナ", "AP", "涙", "Tear"] },
+  { "id": "sword",  "name": "BFソード",                       "short": "BFソード",  "en": "B.F. Sword",           "component": true,  "stat": "AD",    "keywords": ["AD", "剣", "Sword", "BFソード"] },
+  { "id": "bow",    "name": "リカーブボウ",                   "short": "リカーブボウ","en": "Recurve Bow",         "component": true,  "stat": "攻撃速度","keywords": ["AD", "AS", "攻撃速度", "弓", "Bow", "リカーブボウ"] },
+  { "id": "glove",  "name": "スパーリンググローブ",           "short": "グローブ",  "en": "Sparring Gloves",      "component": true,  "stat": "クリティカル","keywords": ["Crit", "クリティカル", "グローブ", "Glove"] },
+  { "id": "vest",   "name": "チェーンベスト",                 "short": "チョッキ",  "en": "Chain Vest",           "component": true,  "stat": "鎧",    "keywords": ["Tank", "Armor", "鎧", "チョッキ", "Vest"] },
+  { "id": "belt",   "name": "ジャイアンツ・ベルト",           "short": "ベルト",    "en": "Giant's Belt",         "component": true,  "stat": "HP",    "keywords": ["Tank", "HP", "ベルト", "Belt"] },
+  { "id": "cloak",  "name": "ネガトロン・クローク",           "short": "クローク",  "en": "Negatron Cloak",       "component": true,  "stat": "魔法耐性","keywords": ["Tank", "MR", "クローク", "Cloak", "チェーン"] },
+  { "id": "spatula","name": "スパチュラ",                     "short": "スパチュラ","en": "Spatula",              "component": true,  "stat": "特殊",  "keywords": ["Emblem", "スパチュラ", "Spatula"] },
+
+  { "id": "deathblade",    "name": "デスブレード",              "component": false, "stat": "AD",        "recipe": ["sword","sword"],  "keywords": ["AD", "デスブレード"] },
+  { "id": "rageblade",     "name": "ギンソーのレイジブレード",  "component": false, "stat": "AD+AS",     "recipe": ["sword","bow"],    "keywords": ["AD", "AS", "ギンソー"] },
+  { "id": "ie",            "name": "インフィニティ・エッジ",    "component": false, "stat": "AD+Crit",   "recipe": ["sword","glove"],  "keywords": ["AD", "Crit", "インフィニティ"] },
+  { "id": "bt",            "name": "ブラッドサースター",        "component": false, "stat": "AD+吸血",   "recipe": ["sword","vest"],   "keywords": ["AD", "ブラッドサースター"] },
+  { "id": "sterak",        "name": "ステラックの篭手",          "component": false, "stat": "AD+HP",     "recipe": ["sword","belt"],   "keywords": ["AD", "HP", "ステラック"] },
+  { "id": "gunblade",      "name": "ヘクステック・ガンブレード","component": false, "stat": "AD+AP",     "recipe": ["sword","tear"],   "keywords": ["AD", "AP", "ガンブレード"] },
+  { "id": "qss",           "name": "クイックシルバー",          "component": false, "stat": "AD+免疫",   "recipe": ["sword","cloak"],  "keywords": ["AD", "クイックシルバー"] },
+
+  { "id": "rfc",           "name": "ラピッドファイア・キャノン","component": false, "stat": "AS+射程",   "recipe": ["bow","bow"],      "keywords": ["AS", "攻撃速度", "ラピッドファイア"] },
+  { "id": "lw",            "name": "ラスト・ウィスパー",        "component": false, "stat": "AD+防御貫通","recipe": ["bow","glove"],   "keywords": ["AD", "Crit", "ラスト・ウィスパー"] },
+  { "id": "sunfire",       "name": "サンファイア・ケープ",      "component": false, "stat": "HP+燃焼",   "recipe": ["vest","belt"],    "keywords": ["Tank", "HP", "サンファイア"] },
+  { "id": "gargoyle",      "name": "ガーゴイル・ストーンプレート","component":false,"stat": "鎧+MR",    "recipe": ["vest","vest"],    "keywords": ["Tank", "Armor", "ガーゴイル"] },
+  { "id": "thornmail",     "name": "ソーンメイル",              "component": false, "stat": "鎧+反射",   "recipe": ["vest","cloak"],   "keywords": ["Tank", "Armor", "ソーンメイル"] },
+
+  { "id": "warmog",        "name": "ウォーモグのアーマー",      "component": false, "stat": "HP",        "recipe": ["belt","belt"],    "keywords": ["Tank", "HP", "ウォーモグ"] },
+  { "id": "redemption",    "name": "リデンプション",            "component": false, "stat": "HP+回復",   "recipe": ["tear","belt"],    "keywords": ["HP", "回復", "リデンプション"] },
+  { "id": "dragonclaw",    "name": "ドラゴンクロウ",            "component": false, "stat": "MR",        "recipe": ["cloak","cloak"],  "keywords": ["Tank", "MR", "ドラゴンクロウ"] },
+
+  { "id": "rabadon",       "name": "ラバドンのデスキャップ",    "component": false, "stat": "AP",        "recipe": ["rod","rod"],      "keywords": ["AP", "ラバドン"] },
+  { "id": "bluebuff",      "name": "ブルーバフ",                "component": false, "stat": "AP+マナ",   "recipe": ["rod","tear"],     "keywords": ["AP", "マナ", "ブルーバフ"] },
+  { "id": "jg",            "name": "ジュエルド・ガントレット",  "component": false, "stat": "AP+Crit",   "recipe": ["rod","glove"],    "keywords": ["AP", "Crit", "ジュエルド"] },
+  { "id": "ionic",         "name": "アイオニック・スパーク",    "component": false, "stat": "AP+タンク", "recipe": ["rod","vest"],     "keywords": ["AP", "Tank", "アイオニック"] },
+
+  { "id": "shojin",        "name": "蒼者の穂先",                "component": false, "stat": "AP+マナ",   "recipe": ["tear","tear"],    "keywords": ["AP", "マナ", "蒼者"] },
+  { "id": "qss_ap",        "name": "クイックシルバー（AP）",    "component": false, "stat": "AP+免疫",   "recipe": ["tear","cloak"],   "keywords": ["AP", "クイックシルバー"] },
+
+  { "id": "ardent",        "name": "アーデント・センサー",      "component": false, "stat": "AS+AP",     "recipe": ["tear","rod"],     "keywords": ["AP", "AS", "アーデント"] },
+  { "id": "chalice",       "name": "パワーのチャリス",          "component": false, "stat": "AP+MR",     "recipe": ["tear","cloak"],   "keywords": ["AP", "MR", "チャリス"] },
+  { "id": "nightedge",     "name": "ナイトの縁",                "component": false, "stat": "AD+AP",     "recipe": ["sword","rod"],    "keywords": ["AD", "AP", "ナイト"] }
+]
