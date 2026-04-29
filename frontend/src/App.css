@@ -26,6 +26,16 @@ body {
   line-height: 1.6;
 }
 
+html.shop-overlay-page,
+body.shop-overlay-page,
+#root.shop-overlay-page {
+  background: transparent !important;
+}
+
+body.shop-overlay-page {
+  overflow: hidden;
+}
+
 /* ===== レイアウト ===== */
 .app { display: flex; flex-direction: column; min-height: 100vh; }
 
@@ -618,7 +628,7 @@ body:has(.overlay-root) {
   padding: 6px 10px;
   background: rgba(99,102,241,0.2);
   border-radius: 8px 8px 0 0;
-  cursor: move;
+  cursor: default;
   border-bottom: 1px solid rgba(99,102,241,0.4);
 }
 .ov-title {
@@ -725,6 +735,82 @@ body:has(.overlay-root) {
 }
 
 /* ショップ */
+.ov-shop-slots {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.ov-shop-slot {
+  position: relative;
+  min-width: 0;
+  padding: 7px 7px 6px;
+  border-radius: 8px;
+  border: 1px solid rgba(71, 85, 105, 0.9);
+  background:
+    linear-gradient(180deg, rgba(30, 41, 59, 0.95), rgba(15, 23, 42, 0.92));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+}
+.ov-shop-slot-buy {
+  border-color: rgba(74, 222, 128, 0.85);
+  background:
+    linear-gradient(180deg, rgba(20, 83, 45, 0.9), rgba(6, 24, 16, 0.96));
+  box-shadow:
+    0 0 14px rgba(74, 222, 128, 0.22),
+    inset 0 0 0 1px rgba(134, 239, 172, 0.18);
+}
+.ov-shop-slot-maybe {
+  border-color: rgba(250, 204, 21, 0.65);
+  background:
+    linear-gradient(180deg, rgba(113, 63, 18, 0.78), rgba(35, 25, 8, 0.94));
+}
+.ov-shop-slot-skip {
+  opacity: 0.56;
+}
+.ov-shop-slot-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+.ov-shop-slot-index {
+  font-size: 9px;
+  font-weight: 800;
+  color: rgba(148, 163, 184, 0.95);
+}
+.ov-shop-slot-badge {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.75);
+  color: #e2e8f0;
+}
+.ov-shop-slot-name {
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.2;
+  color: #f8fafc;
+  word-break: break-word;
+}
+.ov-shop-slot-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  margin-top: 6px;
+}
+.ov-shop-slot-stars {
+  font-size: 9px;
+  color: #fde68a;
+}
+.ov-shop-slot-score {
+  font-size: 9px;
+  font-weight: 700;
+  color: rgba(226, 232, 240, 0.88);
+}
 .ov-shop-list {
   list-style: none;
   display: flex;
@@ -734,13 +820,18 @@ body:has(.overlay-root) {
 }
 .ov-shop-item {
   display: flex;
-  align-items: center;
-  gap: 5px;
+  flex-direction: column;
+  gap: 4px;
   font-size: 12px;
   padding: 3px 6px;
   border-radius: 4px;
   border-left: 3px solid transparent;
   background: rgba(39,51,73,0.6);
+}
+.ov-shop-line {
+  display: flex;
+  align-items: center;
+  gap: 5px;
 }
 .ov-shop-buy {
   border-left-color: #4ade80;
@@ -768,6 +859,12 @@ body:has(.overlay-root) {
   font-size: 10px;
   font-weight: 600;
   white-space: nowrap;
+}
+.ov-shop-reason {
+  font-size: 10px;
+  line-height: 1.35;
+  color: rgba(203, 213, 225, 0.8);
+  padding-left: 12px;
 }
 .ov-shop-buy .ov-shop-action   { color: #4ade80; }
 .ov-shop-maybe .ov-shop-action { color: #facc15; }
@@ -1624,6 +1721,155 @@ body:has(.overlay-root) {
 .sit-detail { font-size: 12px; color: var(--text-muted); margin-top: 2px; line-height: 1.5; }
 
 /* ===== ショップ指示 ===== */
+.shop-slot-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.shop-slot-card {
+  min-width: 0;
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background:
+    linear-gradient(180deg, rgba(30, 41, 59, 0.92), rgba(15, 23, 42, 0.92));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+}
+.shop-slot-card-buy {
+  border-color: rgba(74, 222, 128, 0.88);
+  background:
+    linear-gradient(180deg, rgba(20, 83, 45, 0.82), rgba(9, 24, 16, 0.96));
+  box-shadow:
+    0 0 18px rgba(74, 222, 128, 0.18),
+    inset 0 0 0 1px rgba(134, 239, 172, 0.16);
+}
+.shop-slot-card-maybe {
+  border-color: rgba(250, 204, 21, 0.58);
+  background:
+    linear-gradient(180deg, rgba(113, 63, 18, 0.75), rgba(42, 29, 8, 0.95));
+}
+.shop-slot-card-skip {
+  opacity: 0.6;
+}
+.shop-slot-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.shop-slot-index {
+  font-size: 10px;
+  font-weight: 800;
+  color: var(--text-muted);
+}
+.shop-slot-badge {
+  font-size: 10px;
+  font-weight: 800;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.65);
+  color: #e2e8f0;
+}
+.shop-slot-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1.25;
+  word-break: break-word;
+}
+.shop-slot-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 8px;
+}
+.shop-slot-stars {
+  font-size: 11px;
+  color: #fde68a;
+}
+.shop-slot-score {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
+/* ===== Fullscreen Shop Overlay ===== */
+.shop-overlay-root {
+  position: fixed;
+  inset: 0;
+  background: transparent;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 2147483000;
+}
+.shop-overlay-card {
+  position: absolute;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 2px solid transparent;
+  background: rgba(15, 23, 42, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.04);
+  backdrop-filter: blur(2px);
+}
+.shop-overlay-buy {
+  border-color: rgba(74, 222, 128, 0.98);
+  background:
+    linear-gradient(180deg, rgba(34, 197, 94, 0.14), rgba(15, 23, 42, 0.04));
+  box-shadow:
+    0 0 26px rgba(74, 222, 128, 0.34),
+    0 0 60px rgba(74, 222, 128, 0.16),
+    inset 0 0 0 1px rgba(134, 239, 172, 0.28);
+}
+.shop-overlay-maybe {
+  border-color: rgba(250, 204, 21, 0.92);
+  background:
+    linear-gradient(180deg, rgba(250, 204, 21, 0.11), rgba(15, 23, 42, 0.03));
+  box-shadow:
+    0 0 18px rgba(250, 204, 21, 0.22),
+    inset 0 0 0 1px rgba(253, 224, 71, 0.18);
+}
+.shop-overlay-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.shop-overlay-slot {
+  font-size: 12px;
+  font-weight: 800;
+  color: rgba(241, 245, 249, 0.96);
+  text-shadow: 0 0 10px rgba(15, 23, 42, 0.9);
+}
+.shop-overlay-badge {
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  padding: 3px 9px;
+  border-radius: 999px;
+  color: #f8fafc;
+  background: rgba(15, 23, 42, 0.7);
+  text-transform: uppercase;
+}
+.shop-overlay-name {
+  margin-top: 10px;
+  font-size: 20px;
+  font-weight: 900;
+  line-height: 1.1;
+  color: #f8fafc;
+  text-shadow:
+    0 0 12px rgba(15, 23, 42, 0.92),
+    0 0 22px rgba(15, 23, 42, 0.6);
+}
+.shop-overlay-reason {
+  margin-top: 8px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: rgba(226, 232, 240, 0.95);
+  text-shadow: 0 0 10px rgba(15, 23, 42, 0.94);
+}
 .shop-list { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .shop-item { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface2); }
 .shop-item-buy  { border-color: #4ade80; border-left: 3px solid #4ade80; background: rgba(74,222,128,0.13); box-shadow: 0 0 8px rgba(74,222,128,0.2); }
@@ -1915,19 +2161,6 @@ body:has(.overlay-root) {
 }
 .v2-stat-label { color: var(--text-muted); font-size: 9px; }
 .v2-stat-value { font-weight: 700; color: var(--text); }
-.v2-stage-chip { align-items: center; }
-.v2-stage-btn {
-  background: none;
-  border: none;
-  color: var(--text-muted);
-  font-size: 11px;
-  line-height: 1;
-  padding: 0 2px;
-  cursor: pointer;
-  user-select: none;
-}
-.v2-stage-btn:hover { color: var(--text); }
-
 /* セクション */
 .v2-section {
   display: flex;
@@ -2035,8 +2268,8 @@ body:has(.overlay-root) {
 /* Override .overlay-root width for top-bar variant */
 .v2-topbar-root {
   position: fixed;
-  width: min(440px, calc(100vw - 24px));
-  min-width: 400px;
+  width: max-content;
+  min-width: 440px;
   background: rgba(15, 23, 42, 0.92);
   border: 1px solid rgba(99,102,241,0.6);
   border-radius: 8px;
@@ -2207,12 +2440,19 @@ body:has(.overlay-root) {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  max-height: calc(100vh - 46px);
+  max-height: 220px;
   overflow-y: auto;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(99,102,241,0.3) transparent;
+  overflow-x: hidden;
   background: rgba(15, 23, 42, 0.95);
   border-radius: 0 0 8px 8px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(99,102,241,0.35) transparent;
+}
+
+.v2-topbar-panel-expanded {
+  max-height: min(520px, calc(100vh - 86px));
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 @media (max-width: 520px) {

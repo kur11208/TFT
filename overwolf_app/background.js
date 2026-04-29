@@ -1,11 +1,12 @@
 'use strict';
 
-const BACKEND = (window.__TFT_ADVISOR_CONFIG__ && window.__TFT_ADVISOR_CONFIG__.backendBase) || 'http://localhost:8000';
+const BACKEND = (window.__TFT_ADVISOR_CONFIG__ && window.__TFT_ADVISOR_CONFIG__.backendBase) || 'http://127.0.0.1:8010';
 
 const REQUIRED_FEATURES = [
   'gep_internal', 'game_info', 'live_client_data',
   'me', 'match_info', 'roster', 'store', 'board', 'bench', 'carousel', 'augments'
 ];
+const BASE_SCREEN_WIDTH = 1920;
 
 const winIds = {};
 let gepState = {};
@@ -38,49 +39,91 @@ function postToBackend(payload) {
 }
 
 const WINDOW_LAYOUTS = {
-  overlay: { width: 640, height: 850, anchor: 'top-right', marginRight: 20, top: 60 },
-  augment: { width: 380, height: 460, anchor: 'bottom-left', left: 24, marginBottom: 120 },
-  forge: { width: 360, height: 480, anchor: 'top-left', left: 24, top: 96 },
-  gods: { width: 400, height: 520, anchor: 'bottom-left', left: 24, marginBottom: 120 },
-  godboon: { width: 380, height: 460, anchor: 'bottom-left', left: 24, marginBottom: 120 }
+  overlay: { width: 560, height: 80, anchor: 'top-right', marginRight: 20, top: 60 },
+  augment: { width: 380, height: 460, anchor: 'top-left', left: 24, top: 88, minWidth: 220, minHeight: 340, safeLeftEdge: 422 },
+  forge: { width: 360, height: 480, anchor: 'top-left', left: 24, top: 96, minWidth: 220, minHeight: 360, safeLeftEdge: 422 },
+  gods: { width: 360, height: 500, anchor: 'top-left', left: 24, top: 88, minWidth: 240, minHeight: 380, safeLeftEdge: 696 },
+  godboon: { width: 380, height: 460, anchor: 'top-left', left: 24, top: 88, minWidth: 220, minHeight: 340, safeLeftEdge: 422 }
 };
+
+function resolveLayoutSize(layout, screenWidth, screenHeight) {
+  let width = layout.width;
+  let height = layout.height;
+
+  if (layout.anchor === 'top-left' && typeof layout.safeLeftEdge === 'number') {
+    const left = layout.left ?? 24;
+    const safeMaxWidth = Math.floor((layout.safeLeftEdge * screenWidth) / BASE_SCREEN_WIDTH) - left - 18;
+    if (Number.isFinite(safeMaxWidth) && safeMaxWidth > 0) {
+      width = Math.min(width, safeMaxWidth);
+    }
+  }
+
+  if (layout.anchor === 'top-left') {
+    const left = layout.left ?? 24;
+    width = Math.min(width, screenWidth - left - 12);
+    height = Math.min(height, screenHeight - (layout.top ?? 80) - 24);
+  }
+
+  if (typeof layout.minWidth === 'number') {
+    width = Math.max(layout.minWidth, width);
+  }
+  if (typeof layout.minHeight === 'number') {
+    height = Math.max(layout.minHeight, height);
+  }
+
+  return { width, height };
+}
 
 function resolveWindowPosition(layout) {
   const screenWidth = window.screen?.availWidth || 1920;
   const screenHeight = window.screen?.availHeight || 1080;
+  const size = resolveLayoutSize(layout, screenWidth, screenHeight);
+  const width = size.width;
+  const height = size.height;
 
   if (layout.anchor === 'top-right') {
     return {
-      x: screenWidth - layout.width - (layout.marginRight ?? 20),
-      y: layout.top ?? 60
+      x: screenWidth - width - (layout.marginRight ?? 20),
+      y: layout.top ?? 60,
+      width,
+      height
     };
   }
 
   if (layout.anchor === 'top-left') {
     return {
       x: layout.left ?? 24,
-      y: layout.top ?? 80
+      y: layout.top ?? 80,
+      width,
+      height
     };
   }
 
   if (layout.anchor === 'bottom-left') {
     return {
       x: layout.left ?? 24,
-      y: Math.max(80, screenHeight - layout.height - (layout.marginBottom ?? 80))
+      y: Math.max(80, screenHeight - height - (layout.marginBottom ?? 80)),
+      width,
+      height
     };
   }
 
   return {
     x: layout.left ?? 24,
-    y: Math.max(layout.minTop ?? 80, Math.floor((screenHeight - layout.height) / 2))
+    y: Math.max(layout.minTop ?? 80, Math.floor((screenHeight - height) / 2)),
+    width,
+    height
   };
 }
 
 function positionWindow(name, windowId) {
   const layout = WINDOW_LAYOUTS[name];
   if (!layout || !windowId || typeof overwolf.windows.changePosition !== 'function') return;
-  const { x, y } = resolveWindowPosition(layout);
+  const { x, y, width, height } = resolveWindowPosition(layout);
 
+  if (typeof overwolf.windows.changeSize === 'function') {
+    overwolf.windows.changeSize({ window_id: windowId, width, height }, () => {});
+  }
   overwolf.windows.changePosition(windowId, x, y, () => {});
 }
 

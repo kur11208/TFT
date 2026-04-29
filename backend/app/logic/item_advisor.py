@@ -3,7 +3,9 @@ Forge component picker, augment choice advisor, and situation advisor.
 """
 import json
 import os
-from typing import List, Optional, Dict
+import re
+from collections import Counter
+from typing import Any, Dict, List, Optional, Tuple
 
 _AUGMENTS_PATH = os.path.join(os.path.dirname(__file__), "../data/current/augments.json")
 _COMPS_PATH    = os.path.join(os.path.dirname(__file__), "../data/current/comps.json")
@@ -115,8 +117,395 @@ ITEM_TAGS: Dict[str, List[str]] = {
 }
 
 
+def _clean_item_text(value: str) -> str:
+    return re.sub(r"[\s・･'’`´\-‐‑‒–—_./]+", "", str(value or "")).lower()
+
+
+def _build_component_aliases() -> tuple[Dict[str, str], List[tuple[str, str]]]:
+    exact: Dict[str, str] = {}
+    searchable: List[tuple[str, str]] = []
+
+    for alias, canonical in ALIASES.items():
+        cleaned = _clean_item_text(alias)
+        if not cleaned:
+            continue
+        exact[cleaned] = canonical
+        if len(cleaned) >= 4:
+            searchable.append((cleaned, canonical))
+
+    for canonical, display in COMPONENT_DISPLAY.items():
+        for alias in (canonical, display):
+            cleaned = _clean_item_text(alias)
+            if not cleaned:
+                continue
+            exact[cleaned] = canonical
+            if len(cleaned) >= 4:
+                searchable.append((cleaned, canonical))
+
+    searchable.sort(key=lambda item: len(item[0]), reverse=True)
+    return exact, searchable
+
+
+def _build_full_item_aliases() -> tuple[Dict[str, str], List[tuple[str, str]]]:
+    exact: Dict[str, str] = {}
+    searchable: List[tuple[str, str]] = []
+
+    for full_item, tags in ITEM_TAGS.items():
+        aliases = [full_item] + list(tags)
+        for alias in aliases:
+            cleaned = _clean_item_text(alias)
+            if len(cleaned) < 4:
+                continue
+            exact.setdefault(cleaned, full_item)
+            searchable.append((cleaned, full_item))
+
+    searchable.sort(key=lambda item: len(item[0]), reverse=True)
+    return exact, searchable
+
+
+def _combo_parts(key: frozenset) -> Tuple[str, str]:
+    values = list(key)
+    if len(values) == 1:
+        return values[0], values[0]
+    values.sort()
+    return values[0], values[1]
+
+
+_COMPONENT_EXACT_ALIASES, _COMPONENT_SEARCH_ALIASES = _build_component_aliases()
+_FULL_ITEM_EXACT_ALIASES, _FULL_ITEM_SEARCH_ALIASES = _build_full_item_aliases()
+FULL_ITEM_COMPONENTS: Dict[str, Tuple[str, str]] = {
+    full_name: _combo_parts(parts)
+    for parts, full_name in COMBOS.items()
+}
+
+
 def _normalize(name: str) -> str:
     return ALIASES.get(name.strip().lower(), ALIASES.get(name.strip(), name.strip()))
+
+
+def canonicalize_item_name(name: str) -> str:
+    raw = str(name or "").strip()
+    if not raw:
+        return ""
+
+    norm = _normalize(raw)
+    if norm in COMPONENT_DISPLAY:
+        return norm
+
+    cleaned = _clean_item_text(raw)
+    if not cleaned:
+        return raw
+
+    component = _COMPONENT_EXACT_ALIASES.get(cleaned)
+    if component:
+        return component
+
+    full_item = _FULL_ITEM_EXACT_ALIASES.get(cleaned)
+    if full_item:
+        return full_item
+
+    for alias, canonical in _COMPONENT_SEARCH_ALIASES:
+        if alias in cleaned or cleaned in alias:
+            return canonical
+
+    for alias, canonical in _FULL_ITEM_SEARCH_ALIASES:
+        if alias in cleaned or cleaned in alias:
+            return canonical
+
+    return raw
+
+
+def _display_item_name(name: str) -> str:
+    canonical = canonicalize_item_name(name)
+    return canonical or str(name or "").strip()
+
+
+def _unit_name(unit: Any) -> str:
+    if isinstance(unit, dict):
+        return str(unit.get("name") or "")
+    return str(getattr(unit, "name", "") or "")
+
+
+def _unit_stars(unit: Any) -> int:
+    if isinstance(unit, dict):
+        return int(unit.get("stars") or 1)
+    return int(getattr(unit, "stars", 1) or 1)
+
+
+def _unit_items(unit: Any) -> List[str]:
+    if isinstance(unit, dict):
+        items = unit.get("items") or []
+    else:
+        items = getattr(unit, "items", []) or []
+    return [str(item).strip() for item in items if str(item).strip()]
+
+
+def _find_state_unit(state: Any, unit_name: str) -> tuple[str, Any] | tuple[None, None]:
+    candidates: List[tuple[int, int, str, Any]] = []
+    for location in ("board", "bench"):
+        for unit in getattr(state, location, []) or []:
+            if _unit_name(unit) != unit_name:
+                continue
+            rank = 0 if location == "board" else 1
+            candidates.append((rank, -_unit_stars(unit), location, unit))
+
+    if not candidates:
+        return None, None
+
+    candidates.sort(key=lambda item: (item[0], item[1]))
+    _, _, location, unit = candidates[0]
+    return location, unit
+
+
+def _format_item_list(items: List[str], separator: str = " / ") -> str:
+    return separator.join(_display_item_name(item) for item in items if item)
+
+
+def _build_target_item_state(
+    name: str,
+    ideal_items: List[str],
+    location: Optional[str],
+    unit: Any,
+    held_components: Counter,
+    held_full_items: Counter,
+) -> Dict[str, Any]:
+    ideal = [canonicalize_item_name(item) for item in ideal_items if canonicalize_item_name(item)]
+    equipped = [canonicalize_item_name(item) for item in _unit_items(unit) if canonicalize_item_name(item)]
+
+    equipped_counter = Counter(equipped)
+    matched: List[str] = []
+    missing: List[str] = []
+    remaining_equipped = equipped_counter.copy()
+    for item in ideal:
+        if remaining_equipped[item] > 0:
+            matched.append(item)
+            remaining_equipped[item] -= 1
+        else:
+            missing.append(item)
+
+    goal_counter = Counter(ideal)
+    off_plan: List[str] = []
+    for item in equipped:
+        if goal_counter[item] > 0:
+            goal_counter[item] -= 1
+        else:
+            off_plan.append(item)
+
+    available_components = held_components.copy()
+    available_full_items = held_full_items.copy()
+    ready_to_equip: List[str] = []
+    craftable_now: List[Dict[str, Any]] = []
+    next_goal: Optional[Dict[str, Any]] = None
+
+    for item in missing:
+        if available_full_items[item] > 0:
+            available_full_items[item] -= 1
+            ready_to_equip.append(item)
+            continue
+
+        parts = FULL_ITEM_COMPONENTS.get(item)
+        if parts:
+            needed = Counter(parts)
+            if all(available_components[part] >= count for part, count in needed.items()):
+                for part, count in needed.items():
+                    available_components[part] -= count
+                craftable_now.append({"item": item, "components": list(parts)})
+                continue
+            if next_goal is None:
+                missing_parts: List[str] = []
+                for part, count in needed.items():
+                    shortage = max(0, count - available_components[part])
+                    missing_parts.extend([part] * shortage)
+                next_goal = {
+                    "item": item,
+                    "components": list(parts),
+                    "missing_components": missing_parts,
+                }
+        elif next_goal is None:
+            next_goal = {"item": item, "components": [], "missing_components": []}
+
+    return {
+        "name": name,
+        "location": location or "missing",
+        "equipped_items": equipped,
+        "ideal_items": ideal,
+        "matched_items": matched,
+        "missing_items": missing,
+        "off_plan_items": off_plan,
+        "ready_to_equip": ready_to_equip,
+        "craftable_now": craftable_now,
+        "next_goal": next_goal,
+        "slots_full": len(equipped) >= 3,
+    }
+
+
+def build_item_advice_context(state: Any, comp_id: str) -> Dict[str, Any]:
+    comp = _load_comp_data(comp_id)
+    if not comp:
+        return {}
+
+    held_items = [canonicalize_item_name(item) for item in getattr(state, "items", []) or [] if canonicalize_item_name(item)]
+    held_components = Counter(item for item in held_items if item in COMPONENT_DISPLAY)
+    held_full_items = Counter(item for item in held_items if item and item not in COMPONENT_DISPLAY)
+
+    carry_name = comp.get("carry", "")
+    comp_units = comp.get("units", [])
+    carry_plan = next((unit for unit in comp_units if unit.get("name") == carry_name), None)
+
+    frontline_units = [unit for unit in comp_units if unit.get("position") == "frontline"]
+    tank_plan = next((unit for unit in frontline_units if unit.get("items")), frontline_units[0] if frontline_units else None)
+
+    carry_location, carry_unit = _find_state_unit(state, carry_name) if carry_name else (None, None)
+    tank_location, tank_unit = _find_state_unit(state, tank_plan.get("name", "")) if tank_plan else (None, None)
+
+    context: Dict[str, Any] = {
+        "comp": comp,
+        "held_items": held_items,
+        "held_components": held_components,
+        "held_full_items": held_full_items,
+    }
+
+    if carry_plan:
+        context["carry"] = _build_target_item_state(
+            carry_name,
+            carry_plan.get("items", []),
+            carry_location,
+            carry_unit,
+            held_components,
+            held_full_items,
+        )
+
+    if tank_plan:
+        context["tank"] = _build_target_item_state(
+            tank_plan.get("name", ""),
+            tank_plan.get("items", []),
+            tank_location,
+            tank_unit,
+            held_components,
+            held_full_items,
+        )
+
+    return context
+
+
+def _build_target_item_action(target: Dict[str, Any], *, primary: bool) -> Optional[Dict[str, str]]:
+    if not target:
+        return None
+
+    name = target["name"]
+    equipped = target["equipped_items"]
+    ideal = target["ideal_items"]
+    current_text = _format_item_list(equipped) if equipped else "未装備"
+    ideal_text = _format_item_list(ideal) if ideal else "指定なし"
+
+    if primary and target["location"] == "bench":
+        return {
+            "priority": "high",
+            "action": f"{name}を盤面に出して主キャリー化",
+            "detail": f"現在 {current_text}。理想装備は {ideal_text}。",
+        }
+
+    if target["ready_to_equip"]:
+        item = target["ready_to_equip"][0]
+        return {
+            "priority": "high" if primary else "medium",
+            "action": f"{name}に{item}を載せる",
+            "detail": f"現在 {current_text}。手持ちの完成品をそのまま反映する。",
+        }
+
+    if target["craftable_now"] and not target["slots_full"]:
+        craft = target["craftable_now"][0]
+        parts_text = " + ".join(_display_item_name(part) for part in craft["components"])
+        return {
+            "priority": "high" if primary else "medium",
+            "action": f"{name}へ{craft['item']}を作る",
+            "detail": f"素材: {parts_text}。現在 {current_text}。",
+        }
+
+    next_goal = target["next_goal"]
+    if next_goal and target["missing_items"] and not target["slots_full"]:
+        parts = next_goal.get("components") or []
+        if parts:
+            parts_text = " + ".join(_display_item_name(part) for part in parts)
+            detail = f"{name}の理想装備は {ideal_text}。必要素材: {parts_text}。"
+        else:
+            detail = f"{name}の理想装備は {ideal_text}。"
+        return {
+            "priority": "high" if primary else "medium",
+            "action": f"次の素材は{next_goal['item']}狙い",
+            "detail": detail,
+        }
+
+    if primary and target["slots_full"] and target["missing_items"]:
+        return {
+            "priority": "medium",
+            "action": f"{name}の3枠は埋まり済み",
+            "detail": f"現在 {current_text}。残り素材は前衛か副キャリーへ回す。",
+        }
+
+    return None
+
+
+def _build_target_item_summary(target: Dict[str, Any], *, primary: bool) -> str:
+    if not target:
+        return ""
+
+    name = target["name"]
+    equipped = target["equipped_items"]
+    current_text = _format_item_list(equipped) if equipped else "未装備"
+
+    if primary and target["location"] == "bench":
+        return f"{name}はベンチ。盤面に出して主キャリー化。現在: {current_text}。"
+    if primary and target["location"] == "missing":
+        ideal_text = _format_item_list(target["ideal_items"])
+        return f"{name}は未所持。見つけたら即確保。理想装備は {ideal_text}。"
+    if target["ready_to_equip"]:
+        item = target["ready_to_equip"][0]
+        return f"{name}は現在 {current_text}。手持ちの{item}をそのまま載せる。"
+    if target["craftable_now"] and not target["slots_full"]:
+        craft = target["craftable_now"][0]
+        parts_text = " + ".join(_display_item_name(part) for part in craft["components"])
+        return f"{name}は現在 {current_text}。今は{parts_text}から{craft['item']}を作る。"
+
+    next_goal = target["next_goal"]
+    if next_goal and target["missing_items"] and not target["slots_full"]:
+        if next_goal.get("components"):
+            parts_text = " + ".join(_display_item_name(part) for part in next_goal["components"])
+            return f"{name}は現在 {current_text}。次は{next_goal['item']}狙い。必要素材: {parts_text}。"
+        return f"{name}は現在 {current_text}。次は{next_goal['item']}を優先。"
+
+    if primary and not target["missing_items"]:
+        return f"{name}の主力装備は完成。現在: {current_text}。"
+    if target["slots_full"] and target["missing_items"]:
+        return f"{name}は現在 {current_text}。3枠が埋まっているので、残り素材は別ユニットへ回す。"
+
+    return f"{name}は現在 {current_text}。"
+
+
+def build_item_plan_summary(state: Any, comp_id: str) -> str:
+    context = build_item_advice_context(state, comp_id)
+    if not context:
+        return ""
+
+    parts: List[str] = []
+    carry = context.get("carry")
+    tank = context.get("tank")
+
+    carry_summary = _build_target_item_summary(carry, primary=True) if carry else ""
+    if carry_summary:
+        parts.append(carry_summary)
+
+    if tank and tank.get("name") != (carry or {}).get("name"):
+        if not carry or (carry.get("slots_full") or not carry.get("missing_items")):
+            tank_summary = _build_target_item_summary(tank, primary=False)
+            if tank_summary:
+                parts.append(tank_summary)
+
+    if not parts and context.get("held_components"):
+        held_text = _format_item_list(list(context["held_components"].elements()))
+        parts.append(f"手持ち素材は {held_text}。主キャリー優先で温存。")
+
+    return " ".join(parts[:2]).strip()
 
 
 def _load_augments() -> List[dict]:
@@ -381,6 +770,7 @@ def calc_situation_actions(state, comp_id: str = "") -> List[dict]:
     level  = getattr(state, "level", 1)
     streak = getattr(state, "streak", 0)
     board  = getattr(state, "board", [])
+    bench  = getattr(state, "bench", [])
     items_held = getattr(state, "items", [])
 
     try:
@@ -393,8 +783,8 @@ def calc_situation_actions(state, comp_id: str = "") -> List[dict]:
     min_level  = comp.get("min_level", 7) if comp else 7
     comp_name  = comp.get("name", "") if comp else ""
     play_style = comp.get("play_style", "") if comp else ""
-    board_size = len(board)
     board_names = {u.name for u in board} if board else set()
+    item_context = build_item_advice_context(state, comp_id) if comp else {}
 
     # ── 緊急: HP 低下 ──
     if hp <= 20:
@@ -463,6 +853,19 @@ def calc_situation_actions(state, comp_id: str = "") -> List[dict]:
             "action": f"Lv{level}盤面: {' / '.join(parts)}",
             "detail": detail_carry + detail_bench,
         })
+
+    carry_item_action = _build_target_item_action(item_context.get("carry", {}), primary=True)
+    if carry_item_action:
+        actions.append(carry_item_action)
+
+    tank_item_action = _build_target_item_action(item_context.get("tank", {}), primary=False)
+    carry_state = item_context.get("carry", {})
+    if tank_item_action and (
+        not carry_state
+        or carry_state.get("slots_full")
+        or not carry_state.get("missing_items")
+    ):
+        actions.append(tank_item_action)
 
     # ── 探すべきキーユニット ──
     key_units = [u["name"] for u in comp_units if u.get("stars", 2) >= 2]
@@ -554,7 +957,7 @@ def calc_situation_actions(state, comp_id: str = "") -> List[dict]:
         })
 
     # ── アイテム未装備 ──
-    if len(items_held) >= 2:
+    if len(items_held) >= 2 and not carry_item_action and not tank_item_action:
         actions.append({
             "priority": "medium",
             "action": f"素材アイテム{len(items_held)}個をキャリーに装備",
@@ -565,7 +968,16 @@ def calc_situation_actions(state, comp_id: str = "") -> List[dict]:
     priority_order = {"urgent": 0, "high": 1, "medium": 2}
     actions.sort(key=lambda x: priority_order.get(x["priority"], 3))
 
-    return actions[:6]
+    deduped: List[dict] = []
+    seen_actions: set[str] = set()
+    for action in actions:
+        key = action.get("action", "")
+        if key in seen_actions:
+            continue
+        seen_actions.add(key)
+        deduped.append(action)
+
+    return deduped[:6]
 
 
 def calc_gods_choice(

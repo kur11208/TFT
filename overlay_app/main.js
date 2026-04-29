@@ -9,28 +9,36 @@ const fs = require("fs");
 const path = require("path");
 const { pathToFileURL } = require("url");
 
-const WIN_W = 640;
-const WIN_H = 680;
+const WIN_W = 440;
+const WIN_H = 240;
 const DIST_ENTRY = path.resolve(__dirname, "..", "frontend", "dist", "index.html");
+const API_BASE_OVERRIDE = process.env.TFT_ADVISOR_API_BASE || "";
 const FRONTEND_CANDIDATES = [
   process.env.TFT_ADVISOR_FRONTEND_URL,
+  "http://127.0.0.1:5173",
+  "http://[::1]:5173",
   "http://localhost:5173",
-  "http://localhost:8000",
 ].filter(Boolean);
+const BASE_SCREEN_WIDTH = 1920;
 const WINDOW_LAYOUTS = {
-  overlay: { width: WIN_W, height: WIN_H, anchor: "top-right", marginRight: 20, top: 60 },
-  augment: { width: 380, height: 460, anchor: "bottom-left", left: 24, marginBottom: 120 },
-  forge: { width: 360, height: 480, anchor: "top-left", left: 24, top: 96 },
-  gods: { width: 400, height: 520, anchor: "bottom-left", left: 24, marginBottom: 120 },
-  godboon: { width: 380, height: 460, anchor: "bottom-left", left: 24, marginBottom: 120 },
+  overlay: { width: WIN_W, height: WIN_H, anchor: "fixed", left: 369, top: 43 },
+  augment: { width: 380, height: 460, anchor: "top-left", left: 24, top: 88, minWidth: 220, minHeight: 340, safeLeftEdge: 422 },
+  forge: { width: 360, height: 480, anchor: "top-left", left: 24, top: 96, minWidth: 220, minHeight: 360, safeLeftEdge: 422 },
+  gods: { width: 360, height: 500, anchor: "top-left", left: 24, top: 88, minWidth: 240, minHeight: 380, safeLeftEdge: 696 },
+  godboon: { width: 380, height: 460, anchor: "top-left", left: 24, top: 88, minWidth: 220, minHeight: 340, safeLeftEdge: 422 },
 };
+const OVERLAY_MIN_WIDTH = 440;
+const OVERLAY_MIN_HEIGHT = 64;
+const OVERLAY_FIXED = true;
 
-let frontendBase = "http://localhost:8000";
+let frontendBase = "http://127.0.0.1:8010";
 let win = null;
+let shopWin = null;
 let augWin = null;
 let forgeWin = null;
 let godsWin = null;
 let boonWin = null;
+let overlayMoved = false;
 
 let dragging = false;
 let dragStartCursor = null;
@@ -58,12 +66,23 @@ async function resolveFrontendBase() {
     return pathToFileURL(DIST_ENTRY).toString();
   }
 
-  return "http://localhost:8000";
+  if (await probeHttp("http://127.0.0.1:8010")) {
+    return "http://127.0.0.1:8010";
+  }
+
+  if (await probeHttp("http://localhost:8010")) {
+    return "http://localhost:8010";
+  }
+
+  return "http://127.0.0.1:8010";
 }
 
 function buildAppUrl(params = {}) {
   if (frontendBase.startsWith("file:")) {
     const url = new URL(frontendBase);
+    if (API_BASE_OVERRIDE) {
+      url.searchParams.set("apiBase", String(API_BASE_OVERRIDE));
+    }
     Object.entries(params).forEach(([key, value]) => {
       if (value) url.searchParams.set(key, String(value));
     });
@@ -71,16 +90,48 @@ function buildAppUrl(params = {}) {
   }
 
   const url = new URL(`${frontendBase}/`);
+  if (API_BASE_OVERRIDE) {
+    url.searchParams.set("apiBase", String(API_BASE_OVERRIDE));
+  }
   Object.entries(params).forEach(([key, value]) => {
     if (value) url.searchParams.set(key, String(value));
   });
   return url.toString();
 }
 
+function resolveLayoutSize(layout, screenWidth, screenHeight) {
+  let width = layout.width;
+  let height = layout.height;
+
+  if (layout.anchor === "top-left" && typeof layout.safeLeftEdge === "number") {
+    const left = layout.left ?? 24;
+    const safeMaxWidth = Math.floor((layout.safeLeftEdge * screenWidth) / BASE_SCREEN_WIDTH) - left - 18;
+    if (Number.isFinite(safeMaxWidth) && safeMaxWidth > 0) {
+      width = Math.min(width, safeMaxWidth);
+    }
+  }
+
+  if (layout.anchor === "top-left") {
+    const left = layout.left ?? 24;
+    width = Math.min(width, screenWidth - left - 12);
+    height = Math.min(height, screenHeight - (layout.top ?? 80) - 24);
+  }
+
+  if (typeof layout.minWidth === "number") {
+    width = Math.max(layout.minWidth, width);
+  }
+  if (typeof layout.minHeight === "number") {
+    height = Math.max(layout.minHeight, height);
+  }
+
+  return { width, height };
+}
+
 function resolveWindowBounds(layout) {
   const { width: screenWidth, height: screenHeight } = screen.getPrimaryDisplay().workAreaSize;
-  const width = layout.width;
-  const height = layout.height;
+  const size = resolveLayoutSize(layout, screenWidth, screenHeight);
+  const width = size.width;
+  const height = size.height;
 
   if (layout.anchor === "top-right") {
     return {
@@ -88,6 +139,15 @@ function resolveWindowBounds(layout) {
       height,
       x: screenWidth - width - (layout.marginRight ?? 20),
       y: layout.top ?? 60,
+    };
+  }
+
+  if (layout.anchor === "fixed") {
+    return {
+      width,
+      height,
+      x: layout.left ?? 0,
+      y: layout.top ?? 0,
     };
   }
 
@@ -117,6 +177,53 @@ function resolveWindowBounds(layout) {
   };
 }
 
+function resolveFullscreenBounds() {
+  const display = screen.getPrimaryDisplay();
+  return {
+    x: display.bounds.x,
+    y: display.bounds.y,
+    width: display.bounds.width,
+    height: display.bounds.height,
+  };
+}
+
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function resizeOverlayWindow(width, height) {
+  if (!win) return;
+
+  const display = screen.getDisplayMatching(win.getBounds());
+  const workArea = display.workArea;
+  const nextWidth = clamp(Math.ceil(width), Math.min(OVERLAY_MIN_WIDTH, workArea.width), workArea.width);
+  const nextHeight = clamp(Math.ceil(height), Math.min(OVERLAY_MIN_HEIGHT, workArea.height), workArea.height);
+  const currentBounds = win.getBounds();
+  const nextBounds = {
+    x: currentBounds.x,
+    y: currentBounds.y,
+    width: nextWidth,
+    height: nextHeight,
+  };
+
+  if (OVERLAY_FIXED || !overlayMoved) {
+    nextBounds.x = workArea.x + (WINDOW_LAYOUTS.overlay.left ?? 0);
+    nextBounds.y = workArea.y + (WINDOW_LAYOUTS.overlay.top ?? 0);
+  } else {
+    nextBounds.x = clamp(currentBounds.x, workArea.x, workArea.x + workArea.width - nextWidth);
+    nextBounds.y = clamp(currentBounds.y, workArea.y, workArea.y + workArea.height - nextHeight);
+  }
+
+  if (
+    nextBounds.x !== currentBounds.x ||
+    nextBounds.y !== currentBounds.y ||
+    nextBounds.width !== currentBounds.width ||
+    nextBounds.height !== currentBounds.height
+  ) {
+    win.setBounds(nextBounds);
+  }
+}
+
 function makePopupWindow(layout) {
   const bounds = resolveWindowBounds(layout);
   const browserWindow = new BrowserWindow({
@@ -136,14 +243,66 @@ function makePopupWindow(layout) {
       nodeIntegration: false,
     },
   });
-  browserWindow.setContentProtection(true);
+  browserWindow.setContentProtection(false);
   browserWindow.setAlwaysOnTop(true, "screen-saver", 1);
   browserWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   return browserWindow;
 }
 
+function createShopOverlayWindow() {
+  const bounds = resolveFullscreenBounds();
+  shopWin = new BrowserWindow({
+    ...bounds,
+    transparent: true,
+    frame: false,
+    backgroundColor: "#00000000",
+    hasShadow: false,
+    skipTaskbar: true,
+    resizable: true,
+    alwaysOnTop: true,
+    focusable: false,
+    fullscreenable: false,
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+
+  shopWin.setContentProtection(false);
+  shopWin.setAlwaysOnTop(true, "screen-saver", 1);
+  shopWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  shopWin.setIgnoreMouseEvents(true, { forward: true });
+  shopWin.loadURL(buildAppUrl({ page: "shop-overlay" }));
+  shopWin.on("closed", () => {
+    shopWin = null;
+  });
+}
+
+function syncShopOverlayBounds() {
+  if (!shopWin) return;
+  shopWin.setBounds(resolveFullscreenBounds());
+}
+
+function showPrimaryOverlays() {
+  if (win) {
+    win.show();
+    win.setAlwaysOnTop(true, "screen-saver", 1);
+  }
+  if (shopWin) {
+    syncShopOverlayBounds();
+    shopWin.showInactive();
+    shopWin.setAlwaysOnTop(true, "screen-saver", 1);
+  }
+}
+
+function hidePrimaryOverlays() {
+  shopWin?.hide();
+  win?.hide();
+}
+
 function createWindow() {
   const bounds = resolveWindowBounds(WINDOW_LAYOUTS.overlay);
+  overlayMoved = false;
 
   win = new BrowserWindow({
     ...bounds,
@@ -152,7 +311,8 @@ function createWindow() {
     backgroundColor: "#00000000",
     hasShadow: false,
     skipTaskbar: true,
-    resizable: true,
+    resizable: false,
+    movable: false,
     alwaysOnTop: true,
     focusable: true,
     fullscreenable: false,
@@ -163,11 +323,22 @@ function createWindow() {
     },
   });
 
-  win.setContentProtection(true);
+  win.setContentProtection(false);
   win.setAlwaysOnTop(true, "screen-saver", 1);
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-  win.setIgnoreMouseEvents(true, { forward: true });
   win.loadURL(buildAppUrl({ overlay: "2" }));
+  win.on("show", () => {
+    if (shopWin) {
+      syncShopOverlayBounds();
+      shopWin.showInactive();
+    }
+  });
+  win.on("hide", () => {
+    shopWin?.hide();
+  });
+  win.on("minimize", () => {
+    shopWin?.hide();
+  });
   win.on("closed", () => {
     win = null;
   });
@@ -196,16 +367,27 @@ function createPopupWindows() {
 }
 
 ipcMain.on("mouse-enter", () => win?.setIgnoreMouseEvents(false));
-ipcMain.on("mouse-leave", () => {
-  if (!dragging) {
-    win?.setIgnoreMouseEvents(true, { forward: true });
+ipcMain.on("mouse-leave", () => win?.setIgnoreMouseEvents(false));
+ipcMain.on("close-overlay", () => hidePrimaryOverlays());
+ipcMain.on("minimize", () => hidePrimaryOverlays());
+ipcMain.on("set-overlay-size", (_, size) => {
+  if (
+    !size ||
+    typeof size.width !== "number" ||
+    typeof size.height !== "number" ||
+    !Number.isFinite(size.width) ||
+    !Number.isFinite(size.height)
+  ) {
+    return;
   }
+
+  resizeOverlayWindow(size.width, size.height);
 });
-ipcMain.on("close-overlay", () => win?.hide());
-ipcMain.on("minimize", () => win?.minimize());
 
 ipcMain.on("drag-start", () => {
+  if (OVERLAY_FIXED) return;
   if (!win) return;
+  overlayMoved = true;
   dragging = true;
   dragStartCursor = screen.getCursorScreenPoint();
   dragStartWinPos = win.getPosition();
@@ -213,6 +395,7 @@ ipcMain.on("drag-start", () => {
 });
 
 ipcMain.on("drag-move", () => {
+  if (OVERLAY_FIXED) return;
   if (!dragging || !win || !dragStartCursor || !dragStartWinPos) return;
   const cursor = screen.getCursorScreenPoint();
   const deltaX = cursor.x - dragStartCursor.x;
@@ -221,10 +404,11 @@ ipcMain.on("drag-move", () => {
 });
 
 ipcMain.on("drag-end", () => {
+  if (OVERLAY_FIXED) return;
   dragging = false;
   dragStartCursor = null;
   dragStartWinPos = null;
-  win?.setIgnoreMouseEvents(true, { forward: true });
+  win?.setIgnoreMouseEvents(false);
 });
 
 ipcMain.on("show-augment", (_, stage) => {
@@ -267,15 +451,15 @@ function registerHotkeys() {
   globalShortcut.register("Alt+T", () => {
     if (!win) return;
     if (win.isVisible()) {
-      win.hide();
+      hidePrimaryOverlays();
       return;
     }
-    win.show();
-    win.setAlwaysOnTop(true, "screen-saver", 1);
+    showPrimaryOverlays();
   });
 
   globalShortcut.register("Alt+R", () => {
     if (!win) return;
+    overlayMoved = false;
     const bounds = resolveWindowBounds(WINDOW_LAYOUTS.overlay);
     win.setBounds(bounds);
     win.show();
@@ -286,11 +470,15 @@ function registerHotkeys() {
 app.whenReady().then(async () => {
   frontendBase = await resolveFrontendBase();
   createWindow();
+  createShopOverlayWindow();
   createPopupWindows();
   registerHotkeys();
+  screen.on("display-metrics-changed", () => {
+    syncShopOverlayBounds();
+  });
 
   setInterval(() => {
-    [win, augWin, forgeWin, godsWin, boonWin].forEach((browserWindow) => {
+    [win, shopWin, augWin, forgeWin, godsWin, boonWin].forEach((browserWindow) => {
       if (browserWindow?.isVisible()) {
         browserWindow.setAlwaysOnTop(true, "screen-saver", 1);
       }

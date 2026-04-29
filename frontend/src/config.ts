@@ -1,4 +1,4 @@
-const DEFAULT_API_BASE = "http://localhost:8000";
+const DEFAULT_API_BASE = "http://127.0.0.1:8010";
 
 function trimTrailingSlash(value: string): string {
   return value.replace(/\/+$/, "");
@@ -21,7 +21,7 @@ export const API_BASE = (() => {
   if (runtimeConfig?.apiBase) return trimTrailingSlash(runtimeConfig.apiBase);
   if (import.meta.env.VITE_API_BASE) return trimTrailingSlash(import.meta.env.VITE_API_BASE);
 
-  if (window.location.origin.includes(":8000")) {
+  if (window.location.origin.includes(":8010")) {
     return trimTrailingSlash(window.location.origin);
   }
 

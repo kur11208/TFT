@@ -226,6 +226,7 @@ def _unit_from_external(value: Any) -> Optional[Unit]:
         name=str(champion["name"]),
         stars=_extract_stars(value),
         tags=list(champion.get("tags", [])),
+        items=_extract_unit_items(value),
     )
 
 
@@ -236,7 +237,7 @@ def _normalize_units(value: Any) -> list[Unit]:
         unit = _unit_from_external(raw_unit)
         if unit is None:
             continue
-        dedupe_key = f"{unit.name}:{unit.stars}"
+        dedupe_key = f"{unit.name}:{unit.stars}:{'|'.join(unit.items)}"
         if dedupe_key in seen:
             continue
         seen.add(dedupe_key)
@@ -265,6 +266,29 @@ def _normalize_names(value: Any) -> list[str]:
             continue
         seen.add(name)
         names.append(name)
+    return names
+
+
+def _extract_unit_items(value: Any) -> list[str]:
+    if not isinstance(value, dict):
+        return []
+
+    names: list[str] = []
+    seen: set[str] = set()
+    for key in (
+        "items",
+        "tftItems",
+        "heldItems",
+        "inventoryItems",
+        "equipment",
+        "equippedItems",
+        "itemNames",
+    ):
+        for name in _normalize_names(value.get(key)):
+            if name in seen:
+                continue
+            seen.add(name)
+            names.append(name)
     return names
 
 

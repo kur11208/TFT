@@ -1,13 +1,15 @@
 """
-TFT Advisor バックグラウンドウォッチャー
-.pyw 拡張子 = コンソールウィンドウなしで実行される
+Background watcher for TFT Advisor.
 
-動作:
-  - 3 秒ごとに League of Legends.exe を監視
-  - 起動を検出 → uvicorn サーバーを立ち上げ → ブラウザを開く
-  - 終了を検出 → サーバーを停止
+Run without a console window via `.pyw`.
 
-register_startup.bat で Windows ログイン時の自動起動に登録できる。
+Behavior:
+- Poll every 3 seconds for `League of Legends.exe` or `TFTGame.exe`
+- Start the backend server if needed
+- Open the browser when the game starts
+- Stop the server when the game closes
+
+Use `scripts/windows/register_startup.bat` to register it on Windows logon.
 """
 import os
 import subprocess
@@ -19,10 +21,10 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 VENV_PYTHON = os.path.join(BASE_DIR, ".venv", "Scripts", "python.exe")
 
 GAME_PROCESSES = {"League of Legends.exe", "TFTGame.exe"}
-PORT = 8000
+PORT = 8010
 URL = f"http://localhost:{PORT}"
 
-# Windows: コンソールウィンドウを非表示にするフラグ
+# Windows flag to hide the spawned console window.
 _NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
 
 
@@ -72,14 +74,12 @@ def main() -> None:
     while True:
         now_running = _game_running()
 
-        # ゲーム起動を検出
         if now_running and not was_running:
             if not _server_alive():
                 server = _start_server()
                 _wait_for_server()
             webbrowser.open(URL)
 
-        # ゲーム終了を検出
         elif not now_running and was_running:
             if server is not None:
                 server.terminate()

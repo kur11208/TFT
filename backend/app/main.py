@@ -3,7 +3,6 @@ import json
 import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional
-
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -29,7 +28,14 @@ from .logic.comps import calc_top_comp, load_comps
 from .logic.economy import calc_economy_plan
 from .logic.augments import calc_augment_recommendations
 from .logic.board_advice import calc_board_advice
-from .logic.item_advisor import calc_augment_choice, calc_forge_choice, calc_situation_actions, calc_gods_choice, calc_god_boon
+from .logic.item_advisor import (
+    build_item_plan_summary,
+    calc_augment_choice,
+    calc_forge_choice,
+    calc_god_boon,
+    calc_gods_choice,
+    calc_situation_actions,
+)
 from .auto_screenshot import get_status as get_auto_screenshot_status, start_worker as start_auto_screenshot_worker, stop_worker as stop_auto_screenshot_worker, update_config as update_auto_screenshot_config
 from .state_normalizer import normalize_gep_state
 
@@ -38,6 +44,9 @@ app = FastAPI(title="TFT Advisor API", version="0.2.0")
 _AUGMENT_STAGES = {"2-1", "3-2", "4-2"}
 _GOD_STAGES = {"2-4", "3-4", "4-4"}
 _GOD_BOON_STAGES = {"4-7"}
+_GAME_STATUS_CACHE_TTL_SEC = 2.0
+_game_status_cache: Dict[str, Any] = {"running": False, "process": None}
+_game_status_cache_at = 0.0
 
 
 def _normalize_stage_value(value: Any) -> Optional[str]:
@@ -83,6 +92,146 @@ def _selection_type_for_stage(stage: Optional[str]) -> Optional[str]:
     return None
 
 
+def _selection_type_from_counts(
+    stage_type: Optional[str],
+    aug_count: int,
+    god_count: int,
+    forge_count: int,
+) -> Optional[str]:
+    if god_count >= 1:
+        return "god"
+    if stage_type == "augment" and aug_count >= 2:
+        return "augment"
+    if stage_type == "godboon":
+        return "godboon"
+    if stage_type is None and forge_count >= 2:
+        return "forge"
+    return None
+
+
+def _ocr_region_name(full, rect: Optional[dict], *, conf_threshold: float = 0.16) -> str:
+    if not rect:
+        return ""
+
+    from .capture.ocr import ocr_text
+
+    x = max(0, int(rect["x"]))
+    y = max(0, int(rect["y"]))
+    w = max(1, int(rect["w"]))
+    h = max(1, int(rect["h"]))
+    crop = full[y:y + h, x:x + w]
+    if crop.size == 0:
+        return ""
+
+    text, conf = ocr_text(crop)
+    return text.strip() if conf >= conf_threshold else ""
+
+
+def _read_augment_choices_from_frame(full) -> List[str]:
+    from .capture.augment_detector import find_regions
+    from .capture.augment_matcher import icons_available as aug_icons_ok, match_augment
+    from .capture.selection_matcher import resolve_augment_name
+
+    names: List[str] = []
+    for region in find_regions(full):
+        name_rect = region["name"]
+        icon_rect = region["icon"]
+        raw_text = _ocr_region_name(full, name_rect, conf_threshold=0.12)
+        resolved_text = resolve_augment_name(raw_text) or raw_text
+
+        x = icon_rect["x"]
+        y = icon_rect["y"]
+        w = icon_rect["w"]
+        h = icon_rect["h"]
+        icon_crop = full[y:y + h, x:x + w]
+
+        matched_name = ""
+        if aug_icons_ok() and icon_crop.size:
+            matched_name, _ = match_augment(icon_crop, resolved_text)
+        names.append(matched_name or resolved_text)
+    return names
+
+
+def _read_named_choices_from_regions(full, regions: List[Optional[dict]], resolver) -> List[str]:
+    out: List[str] = []
+    for rect in regions:
+        raw_text = _ocr_region_name(full, rect)
+        out.append(resolver(raw_text) or raw_text)
+    return out
+
+
+def _clip_rect(rect: dict, frame_w: int, frame_h: int) -> Optional[dict]:
+    x = max(0, int(rect["x"]))
+    y = max(0, int(rect["y"]))
+    w = max(1, int(rect["w"]))
+    h = max(1, int(rect["h"]))
+    if x >= frame_w or y >= frame_h:
+        return None
+    w = min(w, frame_w - x)
+    h = min(h, frame_h - y)
+    return {"x": x, "y": y, "w": w, "h": h}
+
+
+def _expanded_rect(rect: dict, frame_w: int, frame_h: int, *, dx: int = 0, dy: int = 0, grow_x: float = 0.45, grow_y: float = 0.35) -> Optional[dict]:
+    grow_w = int(rect["w"] * grow_x)
+    grow_h = int(rect["h"] * grow_y)
+    return _clip_rect(
+        {
+            "x": int(rect["x"]) - grow_w + dx,
+            "y": int(rect["y"]) - grow_h + dy,
+            "w": int(rect["w"]) + grow_w * 2,
+            "h": int(rect["h"]) + grow_h * 2,
+        },
+        frame_w,
+        frame_h,
+    )
+
+
+def _god_region_groups(full) -> List[List[dict]]:
+    from .capture.regions import scale_regions_to_screen
+
+    frame_h, frame_w = full.shape[:2]
+    scaled = scale_regions_to_screen(frame_w, frame_h)
+    groups: List[List[dict]] = []
+
+    for index, fallback_x in ((1, 0.25), (2, 0.53)):
+        candidates: List[dict] = []
+        base = scaled.get(f"god_name_{index}")
+        if base:
+            for dy_ratio in (-0.12, -0.06, 0.0, 0.06, 0.12):
+                rect = _expanded_rect(base, frame_w, frame_h, dy=int(frame_h * dy_ratio))
+                if rect:
+                    candidates.append(rect)
+
+        for rect in (
+            {"x": int(frame_w * fallback_x), "y": int(frame_h * 0.22), "w": int(frame_w * 0.24), "h": int(frame_h * 0.18)},
+            {"x": int(frame_w * (fallback_x - 0.04)), "y": int(frame_h * 0.32), "w": int(frame_w * 0.31), "h": int(frame_h * 0.22)},
+            {"x": int(frame_w * (fallback_x - 0.06)), "y": int(frame_h * 0.18), "w": int(frame_w * 0.36), "h": int(frame_h * 0.42)},
+        ):
+            clipped = _clip_rect(rect, frame_w, frame_h)
+            if clipped:
+                candidates.append(clipped)
+        groups.append(candidates)
+
+    return groups
+
+
+def _read_named_choices_from_region_groups(full, region_groups: List[List[dict]], resolver, *, resolved_only: bool = False) -> List[str]:
+    out: List[str] = []
+    for regions in region_groups:
+        fallback_raw = ""
+        resolved_name = ""
+        for rect in regions:
+            raw_text = _ocr_region_name(full, rect, conf_threshold=0.08)
+            if raw_text and not fallback_raw:
+                fallback_raw = raw_text
+            resolved_name = resolver(raw_text)
+            if resolved_name:
+                break
+        out.append(resolved_name or ("" if resolved_only else fallback_raw))
+    return out
+
+
 # ===== Capture schemas =====
 
 class CaptureResult(BaseModel):
@@ -96,6 +245,7 @@ class CaptureResult(BaseModel):
 class CaptureRequest(BaseModel):
     include_preview: bool = False
     existing_state: Optional[AnalyzeRequest] = None
+    fast: bool = False
 
 
 class AutoScreenshotConfig(BaseModel):
@@ -113,7 +263,7 @@ app.add_middleware(
 
 
 @app.get("/health")
-def health():
+async def health():
     return {"status": "ok"}
 
 
@@ -132,9 +282,94 @@ def _shutdown_background_workers() -> None:
 @app.get("/game/status")
 def game_status():
     """ゲームプロセスが起動中かを返す（ポーリング用）。"""
-    from .watcher import find_game_process, is_game_running
+    global _game_status_cache, _game_status_cache_at
+
+    now = time.time()
+    if now - _game_status_cache_at < _GAME_STATUS_CACHE_TTL_SEC:
+        return _game_status_cache
+
+    from .watcher import find_game_process
+
     proc = find_game_process()
-    return {"running": proc is not None, "process": proc}
+    _game_status_cache = {"running": proc is not None, "process": proc}
+    _game_status_cache_at = now
+    return _game_status_cache
+
+
+def _build_game_screen_state_payload() -> Dict[str, Any]:
+    from .watcher import is_game_running
+
+    if not is_game_running():
+        state = "no_game"
+    else:
+        from .capture.screen_detector import detect as detect_screen
+        state = detect_screen()
+
+    live_stage = _read_live_stage()
+    payload: Dict[str, Any] = {"state": state}
+    if live_stage:
+        payload["stage"] = live_stage
+
+    stage_type = _selection_type_for_stage(live_stage)
+    should_scan_selection = state == "selection" or (
+        state != "no_game" and stage_type in {"augment", "god", "godboon"}
+    )
+    if not should_scan_selection:
+        return payload
+
+    try:
+        from .capture.regions import scale_regions_to_screen
+        from .capture.screenshot import capture_full
+        from .capture.selection_matcher import (
+            resolve_component_name,
+            resolve_god_name,
+        )
+
+        full = capture_full()
+
+        read_all = state == "selection" and stage_type is None
+        read_augments = read_all or stage_type == "augment"
+        read_gods = read_all or stage_type == "god"
+        read_forge = read_all
+
+        augments = _read_augment_choices_from_frame(full) if read_augments else ["", "", ""]
+        payload["augments"] = augments
+
+        regions = scale_regions_to_screen(full.shape[1], full.shape[0])
+        gods = (
+            _read_named_choices_from_region_groups(full, _god_region_groups(full), resolve_god_name, resolved_only=True)
+            if read_gods else ["", ""]
+        )
+        forge_items = (
+            _read_named_choices_from_regions(
+                full,
+                [regions.get(f"forge_name_{i}") for i in range(1, 4)],
+                resolve_component_name,
+            )
+            if read_forge else ["", "", ""]
+        )
+        payload["gods"] = gods
+        payload["forge_items"] = forge_items
+
+        aug_count = sum(1 for x in augments if x)
+        god_count = sum(1 for x in gods if x)
+        forge_count = sum(1 for x in forge_items if x)
+
+        selection_type = _selection_type_from_counts(stage_type, aug_count, god_count, forge_count)
+
+        if selection_type is None:
+            payload = {"state": "selection" if state == "selection" else "normal"}
+            if live_stage:
+                payload["stage"] = live_stage
+        else:
+            payload["state"] = "selection"
+            payload["selection_type"] = selection_type
+    except Exception:
+        payload = {"state": "normal"}
+        if live_stage:
+            payload["stage"] = live_stage
+
+    return payload
 
 
 @app.get("/game/screen-state")
@@ -150,6 +385,15 @@ async def game_screen_state(request: Request):
                 break
             await asyncio.sleep(1.5)
             try:
+                payload = await asyncio.to_thread(_build_game_screen_state_payload)
+                payload_key = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+                if payload_key == last_payload_key:
+                    continue
+                last_payload_key = payload_key
+
+                yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+                continue
+
                 from .watcher import is_game_running
                 if not is_game_running():
                     state = "no_game"
@@ -163,68 +407,61 @@ async def game_screen_state(request: Request):
                     payload["stage"] = live_stage
                 if state == "selection":
                     try:
-                        from .capture.screenshot import capture_full, capture_region
-                        from .capture.ocr import ocr_text
+                        from .capture.regions import scale_regions_to_screen
+                        from .capture.screenshot import capture_full
                         from .capture.augment_matcher import match_augment, icons_available as aug_icons_ok
                         from .capture.augment_detector import find_regions
+                        from .capture.selection_matcher import (
+                            resolve_augment_name,
+                            resolve_component_name,
+                            resolve_god_name,
+                        )
 
                         # フルスクリーンを1回キャプチャして使い回す
                         full = capture_full()
 
                         # テンプレートマッチングでカード位置を動的検出
+                        full = capture_full()
                         card_regions = find_regions(full)
-
-                        def _ocr_card_name(r: dict) -> str:
-                            img = full[r["y"]:r["y"]+r["h"], r["x"]:r["x"]+r["w"]]
-                            t, conf = ocr_text(img)
-                            return t.strip() if conf >= 0.10 else ""
 
                         def _aug_slot_tm(idx: int) -> str:
                             cr = card_regions[idx]
                             ir = cr["icon"]
                             icon_img = full[ir["y"]:ir["y"]+ir["h"], ir["x"]:ir["x"]+ir["w"]]
-                            ocr_raw = _ocr_card_name(cr["name"])
+                            raw_text = _ocr_region_name(full, cr["name"], conf_threshold=0.10)
+                            ocr_raw = resolve_augment_name(raw_text) or raw_text
                             if aug_icons_ok():
-                                name, conf = match_augment(icon_img, ocr_raw)
+                                name, _ = match_augment(icon_img, ocr_raw)
                                 return name or ocr_raw
                             return ocr_raw
 
-                        augments = [_aug_slot_tm(i) for i in range(3)]
+                        augments = [_aug_slot_tm(i) for i in range(min(3, len(card_regions)))]
+                        while len(augments) < 3:
+                            augments.append("")
                         payload["augments"] = augments
 
                         # 種別判定（god/forge はまだ固定座標OCR）
                         from .capture.regions import scale_regions_to_screen
-                        from .capture.screenshot import get_screen_size
-                        sw, sh = get_screen_size()
-                        regions = scale_regions_to_screen(sw, sh)
-
-                        def _ocr_slot(key: str) -> str:
-                            r = regions.get(key)
-                            if not r:
-                                return ""
-                            img = capture_region(r)
-                            t, conf = ocr_text(img)
-                            return t.strip() if conf >= 0.30 else ""
-
-                        gods        = [_ocr_slot(f"god_name_{i}")   for i in range(1, 3)]
-                        forge_items = [_ocr_slot(f"forge_name_{i}") for i in range(1, 4)]
-                        payload["gods"]        = gods
+                        regions = scale_regions_to_screen(full.shape[1], full.shape[0])
+                        gods = _read_named_choices_from_regions(
+                            full,
+                            [regions.get(f"god_name_{i}") for i in range(1, 3)],
+                            resolve_god_name,
+                        )
+                        forge_items = _read_named_choices_from_regions(
+                            full,
+                            [regions.get(f"forge_name_{i}") for i in range(1, 4)],
+                            resolve_component_name,
+                        )
+                        payload["gods"] = gods
                         payload["forge_items"] = forge_items
 
-                        aug_count   = sum(1 for x in augments    if x)
-                        god_count   = sum(1 for x in gods         if x)
+                        aug_count = sum(1 for x in augments if x)
+                        god_count = sum(1 for x in gods if x)
                         forge_count = sum(1 for x in forge_items  if x)
                         stage_type = _selection_type_for_stage(live_stage)
 
-                        selection_type: Optional[str] = None
-                        if stage_type == "augment" and aug_count >= 2:
-                            selection_type = "augment"
-                        elif stage_type == "god" and god_count >= 1:
-                            selection_type = "god"
-                        elif stage_type == "godboon":
-                            selection_type = "godboon"
-                        elif stage_type is None and forge_count >= 2:
-                            selection_type = "forge"
+                        selection_type = _selection_type_from_counts(stage_type, aug_count, god_count, forge_count)
 
                         if selection_type is None:
                             payload = {"state": "normal"}
@@ -386,7 +623,7 @@ async def gep_update(data: Dict[str, Any]):
 
 
 @app.get("/game/state")
-def game_state():
+async def game_state():
     """Return current game state from GEP (or empty if no GEP data)."""
     return _current_gep_snapshot()
 
@@ -554,7 +791,7 @@ def capture(req: CaptureRequest):
                     existing_state = AnalyzeRequest(**live_state)
             except Exception:
                 existing_state = None
-        result = capture_game_state(existing=existing_state)
+        result = capture_game_state(existing=existing_state, fast=req.fast)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"画面キャプチャ失敗: {e}")
 
@@ -584,6 +821,7 @@ def capture_augments():
         from .capture.ocr import ocr_text
         from .capture.augment_matcher import match_augment, icons_available as aug_icons_ok
         from .capture.augment_detector import find_regions, load_from_raw
+        from .capture.selection_matcher import resolve_augment_name
     except ImportError as e:
         raise HTTPException(status_code=503, detail=str(e))
 
@@ -597,7 +835,7 @@ def capture_augments():
         name_img = full[nr["y"]:nr["y"]+nr["h"], nr["x"]:nr["x"]+nr["w"]]
         icon_img  = full[ir["y"]:ir["y"]+ir["h"], ir["x"]:ir["x"]+ir["w"]]
         text, conf = ocr_text(name_img)
-        ocr_raw = text.strip() if conf >= 0.15 else ""
+        ocr_raw = resolve_augment_name(text.strip() if conf >= 0.15 else "") or (text.strip() if conf >= 0.15 else "")
         if aug_icons_ok():
             matched, _ = match_augment(icon_img, ocr_raw)
             names.append(matched or ocr_raw)
@@ -700,18 +938,22 @@ def _do_capture_save(label: str = "manual") -> dict:
 @app.post("/capture/screenshot")
 def capture_screenshot():
     """スクリーンショットをそのまま保存（アノテーションなし）。"""
-    import cv2 as _cv2
     from datetime import datetime as _dt
-    from .capture.screenshot import capture_full
-    img = capture_full()
-    if img is None:
+    from PIL import ImageGrab as _ImageGrab
+
+    try:
+        image = _ImageGrab.grab(include_layered_windows=True, all_screens=False)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"capture failed: {e}")
+    if image is None:
         raise HTTPException(status_code=500, detail="capture failed")
+
     save_dir = _os.path.join(_os.path.dirname(__file__), "../../screenshots")
     _os.makedirs(save_dir, exist_ok=True)
     ts = _dt.now().strftime("%Y%m%d_%H%M%S")
-    path = _os.path.join(save_dir, f"ss_{ts}.png")
-    _cv2.imwrite(path, img)
-    return {"ok": True, "file": path}
+    path = _os.path.abspath(_os.path.join(save_dir, f"cap_{ts}.png"))
+    image.save(path)
+    return {"ok": True, "file": path, "timestamp": ts, "label": "manual"}
 
 
 @app.post("/capture/save")
@@ -727,12 +969,12 @@ def capture_save():
 
 
 @app.get("/capture/auto-save/status")
-def capture_auto_save_status():
+async def capture_auto_save_status():
     return get_auto_screenshot_status()
 
 
 @app.put("/capture/auto-save/config")
-def capture_auto_save_config(config: AutoScreenshotConfig):
+async def capture_auto_save_config(config: AutoScreenshotConfig):
     return update_auto_screenshot_config(
         enabled=config.enabled,
         interval_sec=config.interval_sec,
@@ -746,6 +988,20 @@ def get_regions():
     """Return current region configuration."""
     from .capture.regions import load_regions
     return load_regions()
+
+
+@app.get("/capture/shop-overlay-layout")
+def get_shop_overlay_layout():
+    """Return screen-scaled shop card regions for the fullscreen highlight overlay."""
+    from .capture.regions import get_shop_overlay_regions
+    from .capture.screenshot import get_screen_size
+
+    screen_w, screen_h = get_screen_size()
+    return {
+        "screen_width": screen_w,
+        "screen_height": screen_h,
+        "slots": get_shop_overlay_regions(screen_w, screen_h),
+    }
 
 
 @app.put("/capture/regions")
@@ -763,7 +1019,7 @@ def get_all_comps():
 
 
 @app.post("/analyze", response_model=AnalyzeResponse)
-def analyze(req: AnalyzeRequest):
+async def analyze(req: AnalyzeRequest):
     board_strength = calc_board_strength(req)
     top_comp = calc_top_comp(req)
     economy_plan = calc_economy_plan(req, board_strength, top_comp.id)
@@ -892,6 +1148,9 @@ def _calc_cut_candidates(req: AnalyzeRequest, top_comp) -> List[CutCandidate]:
 
     candidates: List[CutCandidate] = []
     for unit in req.board:
+        if unit.items:
+            continue
+
         reasons: List[str] = []
         tag_match = any(t in all_comp_tags for t in unit.tags)
 
@@ -913,6 +1172,10 @@ def _calc_cut_candidates(req: AnalyzeRequest, top_comp) -> List[CutCandidate]:
 
 
 def _calc_item_plan(req: AnalyzeRequest, top_comp) -> str:
+    item_summary = build_item_plan_summary(req, top_comp.id)
+    if item_summary:
+        return item_summary
+
     items = req.items
     comp_id = top_comp.id
 
@@ -988,7 +1251,7 @@ def _calc_next_improvements(req: AnalyzeRequest, top_comp, board_strength: int) 
 
 # ===== ビルド済みフロントエンドの静的配信（本番モード） =====
 # build.bat 実行後に frontend/dist/ が存在する場合、
-# http://localhost:8000/ でそのまま UI を開ける。
+# http://127.0.0.1:8010/ でそのまま UI を開ける。
 # 開発中は npm run dev (port 5173) を使う。
 import os as _os
 _dist = _os.path.join(_os.path.dirname(__file__), "../../frontend/dist")

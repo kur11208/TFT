@@ -9,6 +9,7 @@ class Unit(BaseModel):
     name: str
     stars: int = 1
     tags: List[str] = Field(default_factory=list)
+    items: List[str] = Field(default_factory=list)
 
 
 class AnalyzeRequest(BaseModel):

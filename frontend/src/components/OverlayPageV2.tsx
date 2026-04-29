@@ -11,12 +11,18 @@ import {
   writeSelectionContext,
   writeOverlayContext,
 } from "../utils/analyzeState";
+import {
+  clearOverlayLiveSnapshot,
+  writeOverlayLiveSnapshot,
+} from "../utils/overlayLive";
+import { buildShopHighlights, shopActionLabel } from "../utils/shopHighlights";
 
 type Bridge = {
   mouseEnter(): void;
   mouseLeave(): void;
   minimize(): void;
   close(): void;
+  setOverlaySize(width: number, height: number): void;
   dragStart(): void;
   dragMove(): void;
   dragEnd(): void;
@@ -95,6 +101,7 @@ const owBridge: Bridge = {
   mouseLeave: () => {},
   minimize: () => window.parent.postMessage({ type: "ow:minimize" }, "*"),
   close: () => window.parent.postMessage({ type: "ow:close" }, "*"),
+  setOverlaySize: (width, height) => window.parent.postMessage({ type: "ow:setOverlaySize", width, height }, "*"),
   dragStart: () => window.parent.postMessage({ type: "ow:dragMove" }, "*"),
   dragMove: () => {},
   dragEnd: () => {},
@@ -123,6 +130,29 @@ const SOURCE_LABEL: Record<SourceState, string> = {
   error: "失敗",
 };
 
+async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit = {}, timeoutMs = 8000): Promise<Response> {
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new Error("request timeout");
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timer);
+  }
+}
+
+const POPUP_BASE_SCREEN_WIDTH = 1920;
+const POPUP_SAFE_LEFT_EDGE: Record<PopupPage, number> = {
+  augment: 422,
+  forge: 422,
+  gods: 696,
+  godboon: 422,
+};
+
 function buildPopupUrl(page: string, stage: string): string {
   const url = new URL(window.location.href);
   url.search = "";
@@ -133,15 +163,26 @@ function buildPopupUrl(page: string, stage: string): string {
   return url.toString();
 }
 
-function getBrowserPopupPosition(page: PopupPage, width: number, height: number): { left: number; top: number } {
+function getBrowserPopupFrame(page: PopupPage): { width: number; height: number; left: number; top: number } {
+  const availWidth = window.screen?.availWidth || 1920;
+  const availHeight = window.screen?.availHeight || 1080;
   const left = 24;
-  if (page === "forge") {
-    return { left, top: 96 };
+  const top = page === "forge" ? 96 : 88;
+  const maxWidth = Math.floor((POPUP_SAFE_LEFT_EDGE[page] * availWidth) / POPUP_BASE_SCREEN_WIDTH) - left - 18;
+
+  let width = page === "gods" ? 360 : page === "forge" ? 360 : 380;
+  let height = page === "gods" ? 500 : page === "forge" ? 480 : 460;
+
+  if (Number.isFinite(maxWidth) && maxWidth > 0) {
+    width = Math.min(width, maxWidth);
   }
-  return {
-    left,
-    top: Math.max(80, window.screen.availHeight - height - 120),
-  };
+
+  const minWidth = page === "gods" ? 240 : 220;
+  const minHeight = page === "gods" ? 380 : page === "forge" ? 360 : 340;
+  width = Math.max(minWidth, Math.min(width, availWidth - left - 12));
+  height = Math.max(minHeight, Math.min(height, availHeight - top - 24));
+
+  return { width, height, left, top };
 }
 
 function isAugmentStage(stage: string): boolean {
@@ -158,7 +199,7 @@ function isSelectionPopupAllowed(
   counts: { augments: number; gods: number; forgeItems: number; boons: number },
 ): boolean {
   if (page === "augment") return isAugmentStage(stage) && counts.augments >= 2;
-  if (page === "gods") return isGodStage(stage) && counts.gods >= 1;
+  if (page === "gods") return counts.gods >= 1 || isGodStage(stage);
   if (page === "forge") return counts.forgeItems >= 2;
   if (page === "godboon") return stage === "4-7";
   return false;
@@ -221,6 +262,7 @@ export function OverlayPageV2() {
   const queuedAnalyzeRef = useRef(false);
   const lastGepSignatureRef = useRef("");
   const lastStateRef = useRef<AnalyzeRequest>(DEFAULT_ANALYZE_REQUEST);
+  const resultRef = useRef<AnalyzeResponse | null>(null);
   const popupWindowsRef = useRef<Record<PopupPage, Window | null>>({
     augment: null,
     gods: null,
@@ -230,6 +272,7 @@ export function OverlayPageV2() {
   const activeSelectionPopupRef = useRef<PopupPage | null>(null);
   const autoManagedPopupRef = useRef(false);
   const lastSelectionSignatureRef = useRef("");
+  const selectionMinimizedBeforeRef = useRef<boolean | null>(null);
 
   autoRef.current = autoMode;
   inGameRef.current = inGame;
@@ -258,6 +301,48 @@ export function OverlayPageV2() {
     }
   }, []);
 
+  useEffect(() => {
+    if (!bridge?.setOverlaySize || !rootRef.current || typeof ResizeObserver === "undefined") {
+      return;
+    }
+
+    const node = rootRef.current;
+    let frameId = 0;
+    let lastWidth = 0;
+    let lastHeight = 0;
+
+    const syncSize = () => {
+      frameId = 0;
+      const rect = node.getBoundingClientRect();
+      const width = Math.ceil(rect.width);
+      const height = Math.ceil(rect.height);
+
+      if (width === lastWidth && height === lastHeight) {
+        return;
+      }
+
+      lastWidth = width;
+      lastHeight = height;
+      bridge.setOverlaySize(width, height);
+    };
+
+    const scheduleSync = () => {
+      if (frameId !== 0) return;
+      frameId = window.requestAnimationFrame(syncSize);
+    };
+
+    const observer = new ResizeObserver(scheduleSync);
+    observer.observe(node);
+    scheduleSync();
+
+    return () => {
+      observer.disconnect();
+      if (frameId !== 0) {
+        window.cancelAnimationFrame(frameId);
+      }
+    };
+  }, [bridge]);
+
   const applyOverlayState = useCallback((nextState: AnalyzeRequest) => {
     lastStateRef.current = nextState;
     setStage(nextState.stage);
@@ -265,11 +350,19 @@ export function OverlayPageV2() {
     setHp(nextState.hp);
     setGold(nextState.gold);
     writeOverlayContext({ stage: nextState.stage, hp: nextState.hp, items: nextState.items });
+    writeOverlayLiveSnapshot({
+      updatedAt: Date.now(),
+      inGame: inGameRef.current,
+      state: nextState,
+      result: resultRef.current,
+    });
   }, []);
 
   useEffect(() => {
     if (!inGame) {
       lastStateRef.current = DEFAULT_ANALYZE_REQUEST;
+      resultRef.current = null;
+      clearOverlayLiveSnapshot();
     }
   }, [inGame]);
 
@@ -295,15 +388,22 @@ export function OverlayPageV2() {
     (["augment", "gods", "forge", "godboon"] as PopupPage[]).forEach((page) => {
       hidePopup(page);
     });
+    if (selectionMinimizedBeforeRef.current !== null) {
+      setMinimized(selectionMinimizedBeforeRef.current);
+      selectionMinimizedBeforeRef.current = null;
+    }
     activeSelectionPopupRef.current = null;
     autoManagedPopupRef.current = false;
   }, [hidePopup]);
 
   const showPopup = useCallback((page: PopupPage, popupStage: string, mode: "auto" | "manual" = "manual") => {
-    const width = page === "gods" ? 400 : page === "forge" ? 360 : 380;
-    const height = page === "gods" ? 520 : page === "forge" ? 480 : 460;
+    const { width, height, left, top } = getBrowserPopupFrame(page);
 
     hideSelectionPopups(true);
+    if (selectionMinimizedBeforeRef.current === null) {
+      selectionMinimizedBeforeRef.current = minimized;
+    }
+    setMinimized(true);
     activeSelectionPopupRef.current = page;
     autoManagedPopupRef.current = mode === "auto";
 
@@ -315,18 +415,17 @@ export function OverlayPageV2() {
       return;
     }
 
-    const { left, top } = getBrowserPopupPosition(page, width, height);
     const popup = window.open(
       buildPopupUrl(page, popupStage),
       `tft-${page}`,
       `width=${width},height=${height},left=${left},top=${top},resizable=yes`,
     );
     popupWindowsRef.current[page] = popup;
-  }, [hideSelectionPopups]);
+  }, [hideSelectionPopups, minimized]);
 
   const checkGame = useCallback(async () => {
     try {
-      const response = await fetch(`${API}/game/state`);
+      const response = await fetchWithTimeout(`${API}/game/state`, {}, 3000);
       if (!response.ok) throw new Error();
       const data = await response.json();
       if (data.in_game) {
@@ -336,7 +435,7 @@ export function OverlayPageV2() {
     } catch {}
 
     try {
-      const response = await fetch(`${API}/game/status`);
+      const response = await fetchWithTimeout(`${API}/game/status`, {}, 3000);
       if (!response.ok) throw new Error();
       const data = await response.json();
       setInGame(Boolean(data.running));
@@ -352,6 +451,7 @@ export function OverlayPageV2() {
     }
     queuedAnalyzeRef.current = false;
 
+    busyRef.current = true;
     setBusy(true);
     setErrMsg(null);
 
@@ -378,7 +478,7 @@ export function OverlayPageV2() {
       const activeSources: string[] = [];
 
       try {
-        const response = await fetch(`${API}/game/state`);
+        const response = await fetchWithTimeout(`${API}/game/state`, {}, 4000);
         if (!response.ok) throw new Error(`game/state: ${response.status}`);
         const data = await response.json();
 
@@ -398,7 +498,7 @@ export function OverlayPageV2() {
 
       if (nextSourceMeta.gep !== "ok") {
         try {
-          const response = await fetch(`${API}/lcu/game`);
+          const response = await fetchWithTimeout(`${API}/lcu/game`, {}, 4000);
           if (!response.ok) throw new Error(`lcu/game: ${response.status}`);
           const data = await response.json();
 
@@ -417,12 +517,15 @@ export function OverlayPageV2() {
         }
       }
 
+      const hasLiveState = nextSourceMeta.gep === "ok" || nextSourceMeta.lcu === "ok";
+      const useFastCapture = hasLiveState || inGameRef.current;
+
       try {
-        const response = await fetch(`${API}/capture`, {
+        const response = await fetchWithTimeout(`${API}/capture`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ include_preview: false, existing_state: state }),
-        });
+          body: JSON.stringify({ include_preview: false, existing_state: state, fast: useFastCapture }),
+        }, useFastCapture ? 18000 : 7000);
         if (!response.ok) throw new Error(`capture: ${response.status}`);
         const data = await response.json();
 
@@ -454,15 +557,22 @@ export function OverlayPageV2() {
         active: activeSources.length > 0 ? activeSources.join(" + ") : "手動入力",
       });
 
-      const response = await fetch(`${API}/analyze`, {
+      const response = await fetchWithTimeout(`${API}/analyze`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(state),
-      });
+      }, 8000);
       if (!response.ok) throw new Error(`analyze: ${response.status}`);
 
       const analyzed = (await response.json()) as AnalyzeResponse;
       setResult(analyzed);
+      resultRef.current = analyzed;
+      writeOverlayLiveSnapshot({
+        updatedAt: Date.now(),
+        inGame: true,
+        state,
+        result: analyzed,
+      });
 
       if (analyzed.topComp?.id) {
         writeOverlayContext({
@@ -477,6 +587,7 @@ export function OverlayPageV2() {
     } catch (error) {
       setErrMsg(error instanceof Error ? error.message : "解析に失敗しました");
     } finally {
+      busyRef.current = false;
       setBusy(false);
       if (queuedAnalyzeRef.current && autoRef.current && inGameRef.current) {
         queuedAnalyzeRef.current = false;
@@ -503,20 +614,20 @@ export function OverlayPageV2() {
   const handleDebugSave = useCallback(async () => {
     setDebugSaving(true);
     try {
-      const response = await fetch(`${API}/capture/save`, { method: "POST" });
-      if (!response.ok) throw new Error(`capture/save: ${response.status}`);
+      const response = await fetchWithTimeout(`${API}/capture/screenshot`, { method: "POST" }, 5000);
+      if (!response.ok) throw new Error(`capture/screenshot: ${response.status}`);
 
       const data = await response.json();
       const capture: DebugCapture = {
         summary: (data.summary ?? {}) as Record<string, unknown>,
         low_confidence: (data.low_confidence ?? {}) as Record<string, number>,
-        png: String(data.png ?? ""),
+        png: String(data.png ?? data.file ?? ""),
         timestamp: String(data.timestamp ?? ""),
         label: String(data.label ?? "manual"),
       };
 
       setDebugResult(capture);
-      setLastCaptureTs(capture.timestamp);
+      setLastCaptureTs(capture.timestamp || new Date().toLocaleTimeString());
     } catch (error) {
       setErrMsg(error instanceof Error ? error.message : "キャプチャ保存に失敗しました");
     } finally {
@@ -526,7 +637,7 @@ export function OverlayPageV2() {
 
   const loadAutoSaveStatus = useCallback(async () => {
     try {
-      const response = await fetch(`${API}/capture/auto-save/status`);
+      const response = await fetchWithTimeout(`${API}/capture/auto-save/status`, {}, 3000);
       if (!response.ok) throw new Error(`auto-save/status: ${response.status}`);
       const data = (await response.json()) as AutoSaveStatus;
       setAutoSaveStatus(data);
@@ -590,6 +701,10 @@ export function OverlayPageV2() {
         const live = Boolean(payload.in_game);
 
         setInGame(live);
+        if (!live) {
+          resultRef.current = null;
+          clearOverlayLiveSnapshot();
+        }
         setSourceMeta((current) => ({
           ...current,
           gep: live ? "ok" : current.gep === "error" ? "error" : "miss",
@@ -646,7 +761,7 @@ export function OverlayPageV2() {
 
       try {
         const payload = JSON.parse(event.data) as ScreenStatePayload;
-        const isSelection = payload.state === "selection";
+        const isSelection = payload.state === "selection" || Boolean(payload.selection_type);
 
         if (!isSelection) {
           lastSelectionSignatureRef.current = "";
@@ -759,6 +874,11 @@ export function OverlayPageV2() {
   }, [analyze, autoMode, inGame]);
 
   const handleHeaderMouseDown = useCallback((event: React.MouseEvent) => {
+    const target = event.target instanceof HTMLElement ? event.target : null;
+    if (target?.closest("button, input, select, textarea, a")) {
+      return;
+    }
+
     if (bridge) {
       bridge.dragStart();
       const onMove = () => bridge.dragMove();
@@ -802,29 +922,6 @@ export function OverlayPageV2() {
     event.preventDefault();
   }, []);
 
-  const advanceStage = useCallback(() => {
-    setStage((prev) => {
-      const match = prev.match(/^(\d+)-(\d+)$/);
-      if (!match) return DEFAULT_ANALYZE_REQUEST.stage;
-      const stageNumber = Number.parseInt(match[1], 10);
-      const round = Number.parseInt(match[2], 10);
-      const maxRound = stageNumber === 1 ? 4 : 7;
-      return round < maxRound ? `${stageNumber}-${round + 1}` : `${stageNumber + 1}-1`;
-    });
-  }, []);
-
-  const rewindStage = useCallback(() => {
-    setStage((prev) => {
-      const match = prev.match(/^(\d+)-(\d+)$/);
-      if (!match) return DEFAULT_ANALYZE_REQUEST.stage;
-      const stageNumber = Number.parseInt(match[1], 10);
-      const round = Number.parseInt(match[2], 10);
-      if (round > 1) return `${stageNumber}-${round - 1}`;
-      if (stageNumber > 1) return `${stageNumber - 1}-7`;
-      return DEFAULT_ANALYZE_REQUEST.stage;
-    });
-  }, []);
-
   const openPopup = useCallback((page: PopupPage) => {
     const popupStage = stage || DEFAULT_ANALYZE_REQUEST.stage;
     showPopup(page, popupStage, "manual");
@@ -837,7 +934,13 @@ export function OverlayPageV2() {
     ...situations.filter((item) => item.priority === "medium"),
   ];
   const visibleSituations = detailsOpen ? orderedSituations : orderedSituations.slice(0, 2);
-  const visibleShop = result?.shopRecommendations.slice(0, detailsOpen ? 5 : 3) ?? [];
+  const visibleShop = detailsOpen
+    ? (result?.shopRecommendations ?? [])
+    : (result?.shopRecommendations.slice(0, 3) ?? []);
+  const shopHighlights = buildShopHighlights(lastStateRef.current.shop, result?.shopRecommendations ?? []);
+  const visibleBoardAdvice = detailsOpen ? (result?.boardAdvice ?? []) : [];
+  const visibleCutCandidates = detailsOpen ? (result?.cutCandidates ?? []) : [];
+  const visibleNextImprovements = detailsOpen ? (result?.nextImprovements ?? []) : [];
   const autoSaveLastTs = autoSaveStatus?.last_saved_at
     ? new Date(autoSaveStatus.last_saved_at * 1000).toLocaleTimeString()
     : "";
@@ -857,14 +960,8 @@ export function OverlayPageV2() {
       <div className="v2-topbar" onMouseDown={handleHeaderMouseDown}>
         <span className={`v2-dot ${inGame ? "v2-dot-green" : "v2-dot-gray"}`} />
 
-        <span className="v2-stat-chip v2-stage-chip" onMouseDown={(event) => event.stopPropagation()}>
-          <button className="v2-stage-btn" onClick={rewindStage} onMouseDown={(event) => event.stopPropagation()}>
-            -
-          </button>
+        <span className="v2-stat-chip" onMouseDown={(event) => event.stopPropagation()}>
           <span className="v2-stat-value">{stage}</span>
-          <button className="v2-stage-btn" onClick={advanceStage} onMouseDown={(event) => event.stopPropagation()}>
-            +
-          </button>
         </span>
 
         {inGame && <span className="v2-topbar-meta">Lv {level}</span>}
@@ -962,7 +1059,7 @@ export function OverlayPageV2() {
       </div>
 
       {!minimized && (
-        <div className="v2-topbar-panel">
+        <div className={detailsOpen ? "v2-topbar-panel v2-topbar-panel-expanded" : "v2-topbar-panel"}>
           <div className="v2-source-row">
             <span className={sourceChipClass(sourceMeta.gep)}>GEP {SOURCE_LABEL[sourceMeta.gep]}</span>
             <span className={sourceChipClass(sourceMeta.lcu)}>LCU {SOURCE_LABEL[sourceMeta.lcu]}</span>
@@ -1023,27 +1120,59 @@ export function OverlayPageV2() {
                 {result.economyPlan.reason && <div className="v2-economy-reason">{result.economyPlan.reason}</div>}
               </div>
 
-              {visibleShop.length > 0 && (
+              {(shopHighlights.length > 0 || visibleShop.length > 0) && (
                 <div className="v2-section">
                   <div className="v2-sec-hdr">Shop</div>
-                  <ul className="ov-shop-list">
-                    {visibleShop.map((item, index) => (
-                      <li
-                        key={`${item.name}-${index}`}
-                        className={`ov-shop-item ${
-                          item.action === "buy"
-                            ? "ov-shop-buy"
-                            : item.action === "skip"
-                              ? "ov-shop-skip"
-                              : "ov-shop-maybe"
-                        }`}
-                      >
-                        {item.action === "buy" && <span className="ov-buy-dot" />}
-                        <span className="ov-shop-name">{item.name}</span>
-                        <span className="ov-shop-action">{item.action}</span>
-                      </li>
-                    ))}
-                  </ul>
+                  {shopHighlights.length > 0 && (
+                    <div className="ov-shop-slots">
+                      {shopHighlights.map((item) => (
+                        <div
+                          key={`${item.unit.name}-${item.slot}`}
+                          className={`ov-shop-slot ${
+                            item.action === "buy"
+                              ? "ov-shop-slot-buy"
+                              : item.action === "skip"
+                                ? "ov-shop-slot-skip"
+                                : "ov-shop-slot-maybe"
+                          }`}
+                        >
+                          <div className="ov-shop-slot-top">
+                            <span className="ov-shop-slot-index">{item.slot + 1}</span>
+                            <span className="ov-shop-slot-badge">{shopActionLabel(item.action)}</span>
+                          </div>
+                          <div className="ov-shop-slot-name">{item.unit.name}</div>
+                          <div className="ov-shop-slot-meta">
+                            <span className="ov-shop-slot-stars">{"★".repeat(item.unit.stars)}</span>
+                            {item.score > 0 && <span className="ov-shop-slot-score">{item.score}</span>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {visibleShop.length > 0 && (
+                    <ul className="ov-shop-list">
+                      {visibleShop.map((item, index) => (
+                        <li
+                          key={`${item.name}-${index}`}
+                          className={`ov-shop-item ${
+                            item.action === "buy"
+                              ? "ov-shop-buy"
+                              : item.action === "skip"
+                                ? "ov-shop-skip"
+                                : "ov-shop-maybe"
+                          }`}
+                        >
+                          <div className="ov-shop-line">
+                            {item.action === "buy" && <span className="ov-buy-dot" />}
+                            <span className="ov-shop-name">{item.name}</span>
+                            <span className="ov-shop-action">{shopActionLabel(item.action)}</span>
+                          </div>
+                          {detailsOpen && item.reason && <div className="ov-shop-reason">{item.reason}</div>}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
               )}
 
@@ -1054,10 +1183,10 @@ export function OverlayPageV2() {
                 </div>
               )}
 
-              {detailsOpen && result.boardAdvice.length > 0 && (
+              {visibleBoardAdvice.length > 0 && (
                 <div className="v2-section">
                   <div className="v2-sec-hdr">Board Advice</div>
-                  {result.boardAdvice.slice(0, 4).map((item, index) => (
+                  {visibleBoardAdvice.map((item, index) => (
                     <div
                       key={`${item.label}-${index}`}
                       className={`v2-advice-item ${item.priority === "high" ? "v2-adv-high" : "v2-adv-mid"}`}
@@ -1070,10 +1199,10 @@ export function OverlayPageV2() {
                 </div>
               )}
 
-              {detailsOpen && result.cutCandidates.length > 0 && (
+              {visibleCutCandidates.length > 0 && (
                 <div className="v2-section">
                   <div className="v2-sec-hdr">Cut</div>
-                  {result.cutCandidates.slice(0, 3).map((item, index) => (
+                  {visibleCutCandidates.map((item, index) => (
                     <div key={`${item.name}-${index}`} className="v2-cut-item">
                       - {item.name}
                       {item.reason && <span className="v2-cut-reason"> / {item.reason}</span>}
@@ -1082,11 +1211,11 @@ export function OverlayPageV2() {
                 </div>
               )}
 
-              {detailsOpen && result.nextImprovements.length > 0 && (
+              {visibleNextImprovements.length > 0 && (
                 <div className="v2-section">
                   <div className="v2-sec-hdr">Next</div>
                   <ul className="v2-next-list">
-                    {result.nextImprovements.slice(0, 5).map((item, index) => (
+                    {visibleNextImprovements.map((item, index) => (
                       <li key={`${item}-${index}`}>{item}</li>
                     ))}
                   </ul>

@@ -1,6 +1,7 @@
 import json
 import os
 import requests
+import time
 import urllib3
 from datetime import datetime
 from typing import Dict, Any, Optional
@@ -8,6 +9,7 @@ from typing import Dict, Any, Optional
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 _LOG_PATH = os.path.join(os.path.dirname(__file__), "../../logs/api_debug.jsonl")
+_OCR_STAGE_CACHE: Dict[str, Any] = {"stage": None, "at": 0.0}
 
 
 def _write_log(entry: dict) -> None:
@@ -140,6 +142,17 @@ def _ocr_stage() -> Optional[str]:
         return None
 
 
+def _cached_ocr_stage(ttl: float = 2.0) -> Optional[str]:
+    now = time.time()
+    if now - float(_OCR_STAGE_CACHE.get("at") or 0.0) < ttl:
+        return _OCR_STAGE_CACHE.get("stage")
+
+    stage = _ocr_stage()
+    _OCR_STAGE_CACHE["stage"] = stage
+    _OCR_STAGE_CACHE["at"] = now
+    return stage
+
+
 def get_live_client_data() -> Optional[Dict]:
     """Port 2999 Live Client Data API (active only during a game)."""
     try:
@@ -183,6 +196,119 @@ def _extract_int(obj: Dict, *keys: str) -> Optional[int]:
             except (TypeError, ValueError):
                 pass
     return None
+
+
+def _extract_item_names(obj: Dict[str, Any]) -> list[str]:
+    names: list[str] = []
+    for key in ('items', 'tftItems', 'heldItems', 'inventoryItems', 'equipment', 'equippedItems', 'itemNames'):
+        val = obj.get(key)
+        if not isinstance(val, list):
+            continue
+        for item in val:
+            if isinstance(item, str) and item.strip():
+                names.append(item.strip())
+            elif isinstance(item, dict):
+                n = item.get('displayName') or item.get('name') or item.get('id') or ''
+                if n:
+                    names.append(str(n))
+    return list(dict.fromkeys(names))
+
+
+def _classify_live_unit(unit: Dict[str, Any]) -> Optional[str]:
+    if not isinstance(unit, dict):
+        return None
+
+    for key in ('benchIndex', 'benchSlot', 'benchPosition'):
+        if unit.get(key) is not None:
+            return 'bench'
+    for key in ('boardIndex', 'boardSlot', 'cellId', 'hexCell', 'hexCellId'):
+        if unit.get(key) is not None:
+            return 'board'
+
+    if unit.get('isBench') is True or unit.get('onBench') is True or unit.get('benched') is True:
+        return 'bench'
+    if unit.get('isBoard') is True or unit.get('onBoard') is True:
+        return 'board'
+
+    location = str(unit.get('location') or unit.get('zone') or '').strip().lower()
+    if location in {'bench', 'reserve', 'hand'}:
+        return 'bench'
+    if location in {'board', 'field', 'battlefield'}:
+        return 'board'
+
+    if unit.get('x') is not None and unit.get('y') is not None:
+        return 'board'
+    return None
+
+
+def _extract_live_units(player: Dict[str, Any]) -> tuple[list[dict], list[dict], list[dict]]:
+    from ..state_normalizer import _unit_from_external
+
+    board_units: list[dict] = []
+    bench_units: list[dict] = []
+    all_units: list[dict] = []
+
+    for raw_unit in (player.get('units') or player.get('champions') or []):
+        if not isinstance(raw_unit, dict):
+            continue
+        unit = _unit_from_external(raw_unit)
+        if unit is None:
+            continue
+        normalized = unit.model_dump()
+        all_units.append(normalized)
+        bucket = _classify_live_unit(raw_unit)
+        if bucket == 'board':
+            board_units.append(normalized)
+        elif bucket == 'bench':
+            bench_units.append(normalized)
+
+    return board_units, bench_units, all_units
+
+
+def _merge_unit_items(existing_units: list[dict], live_units: list[dict]) -> list[dict]:
+    if not existing_units or not live_units:
+        return existing_units
+
+    exact: dict[tuple[str, int], list[dict]] = {}
+    fallback: dict[str, list[dict]] = {}
+    for unit in live_units:
+        items = unit.get('items') or []
+        if not items:
+            continue
+        name = str(unit.get('name') or '').strip()
+        stars = int(unit.get('stars') or 1)
+        if not name:
+            continue
+        exact.setdefault((name, stars), []).append(unit)
+        fallback.setdefault(name, []).append(unit)
+
+    merged: list[dict] = []
+    for unit in existing_units:
+        updated = dict(unit)
+        current_items = updated.get('items') or []
+        name = str(updated.get('name') or '').strip()
+        stars = int(updated.get('stars') or 1)
+        source = None
+
+        exact_bucket = exact.get((name, stars))
+        if exact_bucket:
+            source = exact_bucket.pop(0)
+            fallback_bucket = fallback.get(name)
+            if fallback_bucket and source in fallback_bucket:
+                fallback_bucket.remove(source)
+        elif fallback.get(name):
+            source = fallback[name].pop(0)
+
+        if source and source.get('items') and not current_items:
+            updated['items'] = list(source['items'])
+        elif current_items:
+            updated['items'] = list(current_items)
+        else:
+            updated['items'] = []
+
+        merged.append(updated)
+
+    return merged
 
 
 def read_tft_state(lcu_client=None, existing=None) -> Dict[str, Any]:
@@ -232,6 +358,18 @@ def read_tft_state(lcu_client=None, existing=None) -> Dict[str, Any]:
             confidence['stage'] = 0.55
             stage_source = 'estimate'
 
+        # The game-time estimate drifts by round length. Prefer the visible HUD
+        # stage when OCR can read it.
+        ocr_stage = _cached_ocr_stage()
+        if ocr_stage:
+            raw['stage_ocr'] = ocr_stage
+            if ocr_stage != base.get('stage'):
+                base['stage'] = ocr_stage
+                confidence['stage'] = 0.90
+                stage_source = 'ocr'
+            elif stage_source:
+                stage_source = f"{stage_source}+ocr"
+
         _write_log({
             'ts': datetime.utcnow().isoformat(),
             'stage': base.get('stage'),
@@ -256,33 +394,31 @@ def read_tft_state(lcu_client=None, existing=None) -> Dict[str, Any]:
         # HP — port 2999 は TFT の HP を公開していない（allPlayers にも存在しない）
 
         # Items — try activePlayer fields first, then local player's units
-        def _extract_item_names(obj) -> list:
-            names = []
-            for key in ('items', 'tftItems', 'heldItems', 'inventoryItems'):
-                val = obj.get(key)
-                if not isinstance(val, list):
-                    continue
-                for item in val:
-                    if isinstance(item, str) and item.strip():
-                        names.append(item.strip())
-                    elif isinstance(item, dict):
-                        n = item.get('displayName') or item.get('name') or item.get('id') or ''
-                        if n:
-                            names.append(str(n))
-            return names
-
         item_names = _extract_item_names(active)
-        if not item_names:
-            local_name = active.get('summonerName') or active.get('riotId') or ''
-            if local_name:
-                player = _find_local_player(live, local_name)
-                if player:
-                    item_names = _extract_item_names(player)
-                    # allPlayers の units からアイテムを集める
-                    if not item_names:
-                        for unit in (player.get('units') or player.get('champions') or []):
-                            if isinstance(unit, dict):
-                                item_names.extend(_extract_item_names(unit))
+        local_name = active.get('summonerName') or active.get('riotId') or ''
+        player = _find_local_player(live, local_name) if local_name else None
+        board_units: list[dict] = []
+        bench_units: list[dict] = []
+        all_units: list[dict] = []
+        if player:
+            board_units, bench_units, all_units = _extract_live_units(player)
+
+            if board_units:
+                if base.get('board'):
+                    base['board'] = _merge_unit_items(base['board'], board_units)
+                else:
+                    base['board'] = board_units
+            if bench_units:
+                if base.get('bench'):
+                    base['bench'] = _merge_unit_items(base['bench'], bench_units)
+                else:
+                    base['bench'] = bench_units
+
+            if not item_names:
+                item_names = _extract_item_names(player)
+            if not item_names:
+                for unit in all_units:
+                    item_names.extend(unit.get('items') or [])
         if item_names:
             base['items'] = list(dict.fromkeys(item_names))  # 重複除去
             raw['items'] = ', '.join(item_names)

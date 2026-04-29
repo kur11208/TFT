@@ -45,10 +45,10 @@
       "overlay": {
         "file": "windows/overlay.html",
         "transparent": true,
-        "resizable": true,
+        "resizable": false,
         "show_in_taskbar": false,
-        "size": { "width": 640, "height": 850 },
-        "min_size": { "width": 600, "height": 40 }
+        "size": { "width": 560, "height": 80 },
+        "min_size": { "width": 440, "height": 64 }
       },
       "augment": {
         "file": "windows/augment.html",

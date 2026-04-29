@@ -81,11 +81,13 @@ function normalizeUnit(value: unknown): Unit | null {
   const tags = Array.isArray(value.tags)
     ? value.tags.filter((tag): tag is string => typeof tag === "string" && tag.trim().length > 0)
     : [];
+  const items = normalizeStringList(value.items);
 
   return {
     name: value.name.trim(),
     stars: asInt(value.stars, 1, 1, 3),
     tags,
+    items,
   };
 }
 
@@ -99,7 +101,7 @@ function normalizeUnits(value: unknown): Unit[] {
   const deduped: Unit[] = [];
   const seen = new Set<string>();
   for (const unit of units) {
-    const key = `${unit.name}:${unit.stars}`;
+    const key = `${unit.name}:${unit.stars}:${(unit.items ?? []).join("|")}`;
     if (seen.has(key)) continue;
     seen.add(key);
     deduped.push(unit);

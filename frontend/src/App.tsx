@@ -12,6 +12,7 @@ import { InputPanel } from "./components/InputPanel";
 import { OverlayPageV2 } from "./components/OverlayPageV2";
 import { ResultPanel } from "./components/ResultPanel";
 import { AugmentOverlayPage } from "./components/AugmentOverlayPage";
+import { ShopOverlayPage } from "./components/ShopOverlayPage";
 
 const LS_KEY = "tft_analysis_result";
 
@@ -80,6 +81,7 @@ export default function App() {
   if (PAGE === "forge") return <ForgeOverlayPage />;
   if (PAGE === "gods") return <GodsPickerOverlayPage />;
   if (PAGE === "godboon") return <GodBoonOverlayPage />;
+  if (PAGE === "shop-overlay") return <ShopOverlayPage />;
   if (IS_OVERLAY) return <OverlayPageV2 />;
 
   const [request, setRequest] = useState<AnalyzeRequest>(EMPTY_REQUEST);
@@ -193,7 +195,12 @@ export default function App() {
                 <span className="sk">盤面</span>
                 <span className="sv">
                   {request.board.length > 0
-                    ? request.board.map((unit) => `${unit.name}${"★".repeat(unit.stars)}`).join(", ")
+                    ? request.board
+                        .map((unit) => {
+                          const items = unit.items && unit.items.length > 0 ? ` [${unit.items.join("/")}]` : "";
+                          return `${unit.name}${"★".repeat(unit.stars)}${items}`;
+                        })
+                        .join(", ")
                     : "未入力"}
                 </span>
                 <span className="sk">ショップ</span>

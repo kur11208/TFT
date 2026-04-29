@@ -2,6 +2,7 @@ export interface Unit {
   name: string;
   stars: number;
   tags: string[];
+  items?: string[];
 }
 
 export interface AnalyzeRequest {

@@ -30,6 +30,19 @@
         case 'ow:close':
           if (winId) overwolf.windows.minimize(winId, () => {});
           break;
+        case 'ow:setOverlaySize':
+          if (winId && typeof ev.data.width === 'number' && typeof ev.data.height === 'number') {
+            const width = Math.max(440, Math.ceil(ev.data.width));
+            const height = Math.max(64, Math.ceil(ev.data.height));
+            overwolf.windows.changeSize({
+              window_id: winId,
+              width,
+              height
+            }, () => {});
+            const left = Math.max(0, (window.screen?.availWidth || 1920) - width - 20);
+            overwolf.windows.changePosition(winId, left, 60, () => {});
+          }
+          break;
         case 'ow:dragMove':
           if (winId) overwolf.windows.dragMove(winId);
           break;

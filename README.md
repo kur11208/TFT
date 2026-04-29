@@ -42,6 +42,8 @@ TFT/
             └── UnitListInput.tsx
 ```
 
+Windows helper scripts are organized under `scripts/windows/`.
+
 ---
 
 ## セットアップ
@@ -60,18 +62,10 @@ TFT/
 
 ```bash
 cd backend
-python -m venv .venv
-
-# Windows
-.venv\Scripts\activate
-# Mac/Linux
-source .venv/bin/activate
-
-pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8000
+.\run.bat
 ```
 
-起動後 http://localhost:8000/docs で Swagger UI が確認できます。
+起動後 http://127.0.0.1:8010/docs で Swagger UI が確認できます。
 
 ---
 
@@ -91,7 +85,7 @@ http://localhost:5173 でアプリが開きます。
 
 ## 動作確認手順
 
-1. バックエンドを起動（ポート 8000）
+1. バックエンドを起動（ポート 8010）
 2. フロントエンドを起動（ポート 5173）
 3. ブラウザで http://localhost:5173 を開く
 4. **「サンプルを読み込む」** ボタンを押す
@@ -103,7 +97,7 @@ http://localhost:5173 でアプリが開きます。
 ## サンプル入力例（curl）
 
 ```bash
-curl -X POST http://localhost:8000/analyze \
+curl -X POST http://127.0.0.1:8010/analyze \
   -H "Content-Type: application/json" \
   -d '{
     "patch": "current-ranked",

@@ -84,3 +84,39 @@ def scale_regions_to_screen(current_w: int, current_h: int) -> dict:
             "h": int(r["h"] * sy),
         }
     return scaled
+
+
+def get_shop_overlay_regions(current_w: int, current_h: int) -> list[dict[str, int]]:
+    scaled = scale_regions_to_screen(current_w, current_h)
+    regions: list[dict[str, int]] = []
+
+    for slot in range(1, 6):
+        text_rect = scaled.get(f"shop_{slot}")
+        portrait_rect = scaled.get(f"portrait_shop_{slot}")
+        if not text_rect and not portrait_rect:
+            continue
+
+        rects = [rect for rect in (text_rect, portrait_rect) if rect]
+        left = min(rect["x"] for rect in rects)
+        top = min(rect["y"] for rect in rects)
+        right = max(rect["x"] + rect["w"] for rect in rects)
+        bottom = max(rect["y"] + rect["h"] for rect in rects)
+
+        pad_x = max(6, int(current_w * 0.0035))
+        pad_top = max(8, int(current_h * 0.008))
+        pad_bottom = max(8, int(current_h * 0.006))
+
+        x = max(0, left - pad_x)
+        y = max(0, top - pad_top)
+        w = min(current_w - x, (right - left) + pad_x * 2)
+        h = min(current_h - y, (bottom - top) + pad_top + pad_bottom)
+
+        regions.append({
+            "slot": slot,
+            "x": x,
+            "y": y,
+            "w": w,
+            "h": h,
+        })
+
+    return regions

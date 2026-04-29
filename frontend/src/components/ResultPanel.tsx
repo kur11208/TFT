@@ -9,6 +9,7 @@ import type {
   ShopRecommendation,
   SituationAction,
 } from "../types";
+import { buildShopHighlights, shopActionLabel } from "../utils/shopHighlights";
 import { AugmentPicker } from "./AugmentPicker";
 import { ForgePicker } from "./ForgePicker";
 
@@ -146,6 +147,7 @@ export function ResultPanel({ result, request, error, loading }: Props) {
     boardAdvice,
     situationActions,
   } = result;
+  const shopHighlights = buildShopHighlights(request.shop, shopRecommendations);
 
   const frontline = topComp.units.filter((unit) => unit.position === "frontline");
   const backline = topComp.units.filter((unit) => unit.position !== "frontline");
@@ -262,6 +264,32 @@ export function ResultPanel({ result, request, error, loading }: Props) {
 
       <section className="result-section">
         <h3>ショップ優先度</h3>
+        {shopHighlights.length > 0 && (
+          <div className="shop-slot-grid">
+            {shopHighlights.map((item) => (
+              <div
+                key={`${item.unit.name}-${item.slot}`}
+                className={`shop-slot-card ${
+                  item.action === "buy"
+                    ? "shop-slot-card-buy"
+                    : item.action === "skip"
+                      ? "shop-slot-card-skip"
+                      : "shop-slot-card-maybe"
+                }`}
+              >
+                <div className="shop-slot-head">
+                  <span className="shop-slot-index">{item.slot + 1}</span>
+                  <span className="shop-slot-badge">{shopActionLabel(item.action)}</span>
+                </div>
+                <div className="shop-slot-name">{item.unit.name}</div>
+                <div className="shop-slot-meta">
+                  <span className="shop-slot-stars">{"★".repeat(item.unit.stars)}</span>
+                  {item.score > 0 && <span className="shop-slot-score">{item.score}</span>}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
         {shopRecommendations.length === 0 ? (
           <p className="empty-hint">ショップ情報がまだありません。</p>
         ) : (

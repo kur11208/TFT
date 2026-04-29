@@ -37,7 +37,7 @@
       }
     }
 
-    resolvedBase = trimTrailingSlash(config.backendBase || "http://localhost:8000");
+    resolvedBase = trimTrailingSlash(config.backendBase || "http://127.0.0.1:8010");
     return resolvedBase;
   }
 

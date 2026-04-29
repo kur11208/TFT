@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld('electronBridge', {
   mouseLeave:   () => ipcRenderer.send('mouse-leave'),
   minimize:     () => ipcRenderer.send('minimize'),
   close:        () => ipcRenderer.send('close-overlay'),
+  setOverlaySize: (width, height) => ipcRenderer.send('set-overlay-size', { width, height }),
   dragStart:    () => ipcRenderer.send('drag-start'),
   dragMove:     () => ipcRenderer.send('drag-move'),
   dragEnd:      () => ipcRenderer.send('drag-end'),

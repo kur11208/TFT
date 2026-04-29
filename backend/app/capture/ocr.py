@@ -26,6 +26,26 @@ _tess_path = _find_tesseract()
 if _tess_path:
     pytesseract.pytesseract.tesseract_cmd = _tess_path
 
+_LOCAL_TESSDATA_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data", "tessdata"))
+_LOCAL_ENG_DATA = os.path.join(_LOCAL_TESSDATA_DIR, "eng.traineddata")
+_LOCAL_JPN_DATA = os.path.join(_LOCAL_TESSDATA_DIR, "jpn.traineddata")
+_LOCAL_TESSDATA_ARG = _LOCAL_TESSDATA_DIR.replace("\\", "/")
+
+
+def _build_tesseract_config(base: str, *, text_mode: bool = False) -> str:
+    parts = [base]
+    if os.path.isdir(_LOCAL_TESSDATA_DIR):
+        parts.append(f"--tessdata-dir {_LOCAL_TESSDATA_ARG}")
+    if text_mode:
+        langs = []
+        if os.path.exists(_LOCAL_JPN_DATA):
+            langs.append("jpn")
+        if os.path.exists(_LOCAL_ENG_DATA) or _tess_path:
+            langs.append("eng")
+        if langs:
+            parts.append(f'-l {"+".join(dict.fromkeys(langs))}')
+    return " ".join(parts)
+
 def is_tesseract_available() -> bool:
     try:
         pytesseract.get_tesseract_version()
@@ -89,6 +109,19 @@ def preprocess_for_text(img_bgr: np.ndarray) -> np.ndarray:
     return _to_gray_thresh(img)
 
 
+def _text_variants(img_bgr: np.ndarray) -> list[np.ndarray]:
+    upscaled = _upscale(img_bgr, scale=3.0)
+    gray = cv2.cvtColor(upscaled, cv2.COLOR_BGR2GRAY)
+    bright = _isolate_bright(upscaled, threshold=140)
+    kernel = np.ones((2, 2), np.uint8)
+    bright = cv2.morphologyEx(bright, cv2.MORPH_CLOSE, kernel)
+    return [
+        _to_gray_thresh(img_bgr),
+        gray,
+        bright,
+    ]
+
+
 def preprocess_for_stage(img_bgr: np.ndarray) -> np.ndarray:
     """Stage text sits on a dark banner, so an aggressive high-contrast pass is fine."""
     img = _upscale(img_bgr, scale=5.0)
@@ -137,7 +170,24 @@ def _stage_distance(candidate: str, expected: str) -> Optional[int]:
 def ocr_number(img_bgr: np.ndarray, field: str = "") -> Tuple[Optional[int], float]:
     """Read a single integer from a region. Returns (value, confidence 0-1)."""
     proc = preprocess_for_number(img_bgr, field=field)
-    cfg = "--psm 7 --oem 3 -c tessedit_char_whitelist=0123456789"
+    cfg = _build_tesseract_config("--psm 7 --oem 3 -c tessedit_char_whitelist=0123456789")
+
+    def valid_value(value: int) -> bool:
+        if field == "hp":
+            return 0 <= value <= 100
+        if field == "gold":
+            return 0 <= value <= 99
+        if field == "level":
+            return 1 <= value <= 10
+        return True
+
+    raw = pytesseract.image_to_string(proc, config=cfg)
+    digits = re.sub(r"\D", "", raw)
+    if digits:
+        value = int(digits)
+        if valid_value(value) and not (field == "hp" and len(digits) < 2):
+            return value, 0.5 if len(digits) >= 2 else 0.45
+
     data = pytesseract.image_to_data(proc, config=cfg, output_type=pytesseract.Output.DICT)
     texts, confs = [], []
     for text, conf in zip(data["text"], data["conf"]):
@@ -147,6 +197,10 @@ def ocr_number(img_bgr: np.ndarray, field: str = "") -> Tuple[Optional[int], flo
             confs.append(c / 100.0)
     combined = "".join(texts)
     digits = re.sub(r"\D", "", combined)
+    if field == "hp" and len(digits) < 2:
+        digits = ""
+    if digits and not valid_value(int(digits)):
+        digits = ""
     if not digits:
         if field == "gold":
             candidates: list[str] = []
@@ -164,6 +218,10 @@ def ocr_number(img_bgr: np.ndarray, field: str = "") -> Tuple[Optional[int], flo
         raw = pytesseract.image_to_string(proc, config=cfg)
         digits = re.sub(r"\D", "", raw)
         if digits:
+            if field == "hp" and len(digits) < 2:
+                return None, 0.0
+            if not valid_value(int(digits)):
+                return None, 0.0
             # HUD digits are tiny; image_to_data often drops them while
             # image_to_string still returns a usable result.
             return int(digits), 0.5 if len(digits) >= 2 else 0.45
@@ -174,74 +232,89 @@ def ocr_number(img_bgr: np.ndarray, field: str = "") -> Tuple[Optional[int], flo
 
 def ocr_text(img_bgr: np.ndarray) -> Tuple[str, float]:
     """Read a text string from a region. Returns (text, confidence 0-1)."""
-    proc = preprocess_for_text(img_bgr)
-    # PSM 8 = single word, better for champion names; fallback to PSM 7 if empty
-    cfg8 = "--psm 8 --oem 3"
-    cfg7 = "--psm 7 --oem 3"
-    for cfg in (cfg8, cfg7):
-        data = pytesseract.image_to_data(proc, config=cfg, output_type=pytesseract.Output.DICT)
-        texts, confs = [], []
-        for text, conf in zip(data["text"], data["conf"]):
-            c = int(conf)
-            if c > 20 and text.strip():
-                texts.append(text.strip())
-                confs.append(c / 100.0)
-        text = " ".join(texts).strip()
-        if text:
-            avg_conf = sum(confs) / len(confs) if confs else 0.0
-            return text, avg_conf
-    return "", 0.0
+    cfgs = (
+        _build_tesseract_config("--psm 8 --oem 3", text_mode=True),
+        _build_tesseract_config("--psm 7 --oem 3", text_mode=True),
+        _build_tesseract_config("--psm 6 --oem 3", text_mode=True),
+    )
+    best_text = ""
+    best_conf = 0.0
+    best_score = 0.0
+    for proc in _text_variants(img_bgr):
+        for cfg in cfgs:
+            data = pytesseract.image_to_data(proc, config=cfg, output_type=pytesseract.Output.DICT)
+            texts, confs = [], []
+            for text, conf in zip(data["text"], data["conf"]):
+                c = int(conf)
+                if c > 15 and text.strip():
+                    texts.append(text.strip())
+                    confs.append(c / 100.0)
+            text = " ".join(texts).strip()
+            if text:
+                avg_conf = sum(confs) / len(confs) if confs else 0.0
+                score = avg_conf + min(0.25, len(text) * 0.01)
+                if score > best_score:
+                    best_text = text
+                    best_conf = avg_conf
+                    best_score = score
+            raw = pytesseract.image_to_string(proc, config=cfg).strip()
+            if raw:
+                score = 0.2 + min(0.25, len(raw) * 0.01)
+                if score > best_score:
+                    best_text = raw
+                    best_conf = 0.35
+                    best_score = score
+    return best_text, best_conf
 
 
 def ocr_stage(img_bgr: np.ndarray, expected_stage: Optional[str] = None) -> Tuple[str, float]:
     """Read TFT stage text like '3-5' from the top banner."""
-    processed_variants = [
-        ("stage", preprocess_for_stage(img_bgr)),
-        ("bright", preprocess_for_stage_bright(img_bgr)),
-    ]
-    cfgs = (
-        ("psm7", "--psm 7 --oem 3 -c tessedit_char_whitelist=0123456789-"),
-        ("psm8", "--psm 8 --oem 3 -c tessedit_char_whitelist=0123456789-"),
-        ("psm13", "--psm 13 --oem 3 -c tessedit_char_whitelist=0123456789-"),
+    bright = preprocess_for_stage_bright(img_bgr)
+    stage = preprocess_for_stage(img_bgr)
+    psm7 = _build_tesseract_config("--psm 7 --oem 3 -c tessedit_char_whitelist=0123456789-")
+    psm8 = _build_tesseract_config("--psm 8 --oem 3 -c tessedit_char_whitelist=0123456789-")
+    attempts = (
+        ("bright", bright, "psm7", psm7, 0.0, 0.84),
+        ("stage", stage, "psm7", psm7, 0.0, 0.78),
+        ("bright", bright, "psm7", psm7, 0.08, 0.72),
+        ("stage", stage, "psm8", psm8, 0.0, 0.64),
     )
     weighted_scores: Counter[str] = Counter()
     hit_counts: Counter[str] = Counter()
 
-    for variant_name, proc in processed_variants:
+    for variant_name, proc, cfg_name, cfg, trim_ratio, base_confidence in attempts:
         width = proc.shape[1]
-        for cfg_name, cfg in cfgs:
-            for trim_ratio in (0.0, 0.08, 0.16, 0.24, 0.32):
-                start_x = int(width * trim_ratio)
-                end_x = width - int(width * min(trim_ratio * 0.35, 0.12))
-                if end_x <= start_x + 8:
-                    continue
-                sub = proc[:, start_x:end_x]
-                raw = pytesseract.image_to_string(sub, config=cfg).strip()
-                parsed = parse_stage(raw)
-                if not parsed:
-                    continue
+        start_x = int(width * trim_ratio)
+        end_x = width - int(width * min(trim_ratio * 0.35, 0.12))
+        if end_x <= start_x + 8:
+            continue
+        sub = proc[:, start_x:end_x]
+        raw = pytesseract.image_to_string(sub, config=cfg).strip()
+        parsed = parse_stage(raw)
+        if not parsed:
+            continue
 
-                weight = 1.0
-                if trim_ratio == 0.0:
-                    weight += 0.2
-                if variant_name == "stage":
-                    weight += 0.15
-                if cfg_name == "psm7":
-                    weight += 0.1
+        weight = 1.0
+        if trim_ratio == 0.0:
+            weight += 0.2
+        if variant_name == "bright":
+            weight += 0.2
+        if cfg_name == "psm7":
+            weight += 0.1
 
-                if expected_stage:
-                    dist = _stage_distance(parsed, expected_stage)
-                    if dist == 0:
-                        weight += 0.75
-                    elif dist == 1:
-                        weight += 0.45
-                    elif dist == 2:
-                        weight += 0.2
-                    elif dist is not None and dist >= 4:
-                        weight -= 0.55
+        if expected_stage:
+            dist = _stage_distance(parsed, expected_stage)
+            if dist == 0:
+                return parsed, min(base_confidence + 0.06, 0.90)
+            if dist == 1:
+                weight += 0.45
+            elif dist == 2:
+                weight += 0.2
+            elif dist is not None and dist >= 4:
+                weight -= 0.55
 
-                weighted_scores[parsed] += weight
-                hit_counts[parsed] += 1
+        weighted_scores[parsed] += weight
+        hit_counts[parsed] += 1
 
     if weighted_scores:
         best_stage, best_score = max(weighted_scores.items(), key=lambda item: item[1])

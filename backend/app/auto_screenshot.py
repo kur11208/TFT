@@ -76,6 +76,7 @@ def _snapshot() -> dict[str, Any]:
         "last_saved_path": str(state["last_saved_path"]),
         "last_screen_state": str(state["last_screen_state"]),
         "last_skip_reason": str(state["last_skip_reason"]),
+        "last_frame_hash": str(state.get("last_frame_hash", "")),
         "save_count": int(state["save_count"]),
         "revision": int(state["revision"]),
         "output_dir": str(_DEFAULT_OUTPUT_DIR.resolve()),

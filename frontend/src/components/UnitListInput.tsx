@@ -11,7 +11,7 @@ const STAR_OPTIONS = [1, 2, 3];
 
 export function UnitListInput({ label, units, onChange }: Props) {
   const addUnit = () => {
-    onChange([...units, { name: "", stars: 1, tags: [] }]);
+    onChange([...units, { name: "", stars: 1, tags: [], items: [] }]);
   };
 
   const removeUnit = (idx: number) => {

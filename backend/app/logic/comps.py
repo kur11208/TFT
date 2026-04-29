@@ -3,6 +3,7 @@ import os
 from typing import List, Tuple
 
 from ..schemas import AnalyzeRequest, CompResult, CompUnit
+from .item_advisor import canonicalize_item_name
 
 DATA_PATH = os.path.join(os.path.dirname(__file__), "../data/current/comps.json")
 
@@ -10,6 +11,18 @@ DATA_PATH = os.path.join(os.path.dirname(__file__), "../data/current/comps.json"
 def load_comps() -> List[dict]:
     with open(DATA_PATH, "r", encoding="utf-8") as f:
         return json.load(f)
+
+
+def _item_matches_keywords(item_name: str, item_keywords: List[str]) -> bool:
+    text = canonicalize_item_name(item_name).lower()
+    raw = str(item_name or "").lower()
+    return any(
+        keyword.lower() in text
+        or text in keyword.lower()
+        or keyword.lower() in raw
+        or raw in keyword.lower()
+        for keyword in item_keywords
+    )
 
 
 def score_comp(comp: dict, req: AnalyzeRequest) -> Tuple[int, str]:
@@ -23,6 +36,8 @@ def score_comp(comp: dict, req: AnalyzeRequest) -> Tuple[int, str]:
     frontline_tags = set(comp.get("frontline_tags", []))
     item_keywords: List[str] = comp.get("item_keywords", [])
     augment_keywords: List[str] = comp.get("augment_keywords", [])
+    held_items = req.items
+    equipped_items = [item for unit in (req.board + req.bench) for item in unit.items]
 
     matching_tags = sum(1 for tag in all_tags if tag in key_tags)
     tag_score = min(matching_tags * 8, 40)
@@ -35,12 +50,12 @@ def score_comp(comp: dict, req: AnalyzeRequest) -> Tuple[int, str]:
     if frontline_matches > 0:
         reasons.append(f"前衛タグ一致 {frontline_matches}")
 
-    item_matches = sum(
-        1 for item in req.items if any(keyword.lower() in item.lower() for keyword in item_keywords)
-    )
-    score += item_matches * 8
-    if item_matches > 0:
-        reasons.append(f"アイテム相性 {item_matches}")
+    held_item_matches = sum(1 for item in held_items if _item_matches_keywords(item, item_keywords))
+    equipped_item_matches = sum(1 for item in equipped_items if _item_matches_keywords(item, item_keywords))
+    score += held_item_matches * 8
+    score += equipped_item_matches * 10
+    if held_item_matches or equipped_item_matches:
+        reasons.append(f"アイテム相性 {held_item_matches + equipped_item_matches}")
 
     augment_matches = sum(
         1 for augment in req.augments if any(keyword.lower() in augment.lower() for keyword in augment_keywords)
