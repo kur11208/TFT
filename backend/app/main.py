@@ -1029,7 +1029,7 @@ async def analyze(req: AnalyzeRequest):
     next_improvements = _calc_next_improvements(req, top_comp, board_strength)
     augment_recs = calc_augment_recommendations(req, top_comp)
     board_advice = calc_board_advice(req, top_comp)
-    situation = [SituationAction(**a) for a in calc_situation_actions(req, top_comp.id)]
+    situation = [SituationAction(**a) for a in calc_situation_actions(req, top_comp.id, board_strength)]
 
     return AnalyzeResponse(
         boardStrength=board_strength,
@@ -1176,8 +1176,10 @@ def _calc_item_plan(req: AnalyzeRequest, top_comp) -> str:
     if item_summary:
         return item_summary
 
+    comps = load_comps()
+    comp_data = next((c for c in comps if c["id"] == top_comp.id), None) or {}
+    item_keywords = " ".join(str(k) for k in comp_data.get("item_keywords", []))
     items = req.items
-    comp_id = top_comp.id
 
     ap_count = sum(1 for item in items if any(kw in item for kw in [
         "Rod", "Tear", "Hat", "Needlessly", "Goddess", "Rabadon",
@@ -1189,62 +1191,68 @@ def _calc_item_plan(req: AnalyzeRequest, top_comp) -> str:
         "Vest", "Belt", "Chain", "Null", "Negatron", "Giant",
         "チョッキ", "ベルト", "チェーン", "ウォーモグ", "ガーゴイル", "ソーンメイル"]))
 
-    if comp_id == "psionic_carry":
+    if any(keyword in item_keywords for keyword in ["AP", "魔力", "ロッド", "涙", "ブルーバフ", "ラバドン"]):
         if ap_count >= 2:
-            return "AP素材が揃っています。Viktorなど後衛キャリーへ集中して完成を目指してください。Rabadon's / Jeweled Gauntlet / Blue Buff を優先。"
-        return "AP主軸のアイテムを優先。Rod・Tear系素材を積極的に取りにいきましょう。"
+            return f"作る: {top_comp.carry or '主キャリー'}にAP装備。優先: ブルーバフ / ラバドン / ジュエルド。"
+        return "素材: ロッド・涙を優先。APキャリー用に温存。"
 
-    if comp_id == "dark_star_sniper":
+    if any(keyword in item_keywords for keyword in ["AD", "Crit", "クリティカル", "BFソード", "リカーブボウ"]):
         if ad_count >= 2:
-            return "AD素材が揃っています。Jhin / XayahなどのSniperキャリーへ集中して完成を作りましょう。Deathblade / Infinity Edge / Last Whisper を優先。"
-        return "AD/Sniper主軸のアイテムを優先。Sword・Bow系素材を集めましょう。"
+            return f"作る: {top_comp.carry or '主キャリー'}にAD装備。優先: デスブレード / IE / ラストウィスパー。"
+        return "素材: BFソード・弓・グローブを優先。ADキャリー用に温存。"
 
-    if comp_id in ("space_groove_vanguard", "nova_primordian", "stargazer_reroll"):
+    if tank_count >= 2:
+        return "作る: 前衛にタンク装備。優先: ガーゴイル / サンファイア / ウォーモグ。"
+
+    if any(keyword in item_keywords for keyword in ["Tank", "タンク", "HP", "ベルト"]):
         if tank_count >= 2:
-            return "タンク素材が揃っています。前衛ユニットにまとめて持たせましょう。Warmog's / Sunfire / Bramble Vest を優先。"
-        return "前衛にタンク系アイテム（Vest・Belt・Chain系）を優先。後衛には攻撃系を持たせましょう。"
+            return "作る: 前衛にタンク装備。優先: ガーゴイル / サンファイア / ウォーモグ。"
+        return "素材: チョッキ・ベルト・クロークを前衛用に温存。"
 
-    if comp_id == "meeple_fast9":
-        return "Fast 9 なので序盤はアイテム節約優先。Vex/Bardなどメインキャリー向けに Rod・Tear・Bow 系素材を温存してください。"
+    if "Fast 9" in str(comp_data.get("play_style", "")):
+        return "温存: 主キャリー用素材を残す。無理に序盤ユニットへ完成品を固定しない。"
 
-    return "現状の素材に応じてバランスよく配置してください。余剰素材は Sparring Gloves 複合も検討。"
+    return "作る: 手持ち素材で主キャリーか前衛の完成品を1つ作る。"
 
 
 def _calc_next_improvements(req: AnalyzeRequest, top_comp, board_strength: int) -> List[str]:
     improvements: List[str] = []
+    comps = load_comps()
+    comp_data = next((c for c in comps if c["id"] == top_comp.id), None) or {}
+    min_level = int(comp_data.get("min_level", 7) or 7)
+    play_style = str(comp_data.get("play_style", ""))
     board_tags = [tag for unit in req.board for tag in unit.tags]
     frontline_count = sum(1 for t in board_tags if t in FRONTLINE_TAGS)
 
     if frontline_count < 2:
-        improvements.append("前衛ユニット（Vanguard/Bastion）をもう1〜2枚追加して耐久力を確保する")
+        improvements.append("買う: 前衛をもう1-2枚追加")
 
-    if top_comp.id == "meeple_fast9" and req.level < 9:
-        improvements.append(f"レベル{req.level}→9へ経験値購入を進める（Turbo Doomerの核心）")
-    elif top_comp.id == "dark_star_sniper" and req.level < 8:
-        improvements.append(f"レベル{req.level}→8へ経験値購入を進める（高コストSniper獲得のため）")
-    elif top_comp.id in ("space_groove_vanguard", "psionic_carry") and req.level < 7:
-        improvements.append(f"レベル{req.level}→7へ経験値購入を進める")
+    if req.level < min_level:
+        if "リロール" in play_style:
+            improvements.append(f"E: Lv{min_level}まで上げてからD")
+        else:
+            improvements.append(f"E: Lv{min_level}まで上げる")
 
     one_star_units = [u.name for u in req.board if u.stars == 1]
     if one_star_units:
-        improvements.append(f"{one_star_units[0]} など1つ星ユニットを2つ星に昇格させる")
+        improvements.append(f"買う: {one_star_units[0]} など1つ星を2つ星にする")
 
     ds_count = board_tags.count("ダーク・スター")
-    if ds_count > 0 and ds_count < 2 and top_comp.id == "dark_star_sniper":
-        improvements.append("ダーク・スターユニットをもう1枚追加してシナジーを起動する（最低2体必要）")
+    if ds_count > 0 and ds_count < 2 and "dark_star" in top_comp.id:
+        improvements.append("買う: ダーク・スターをもう1枚")
 
     meeple_count = board_tags.count("ミープル")
-    if meeple_count > 0 and meeple_count < 3 and top_comp.id == "meeple_fast9":
-        improvements.append("ミープルユニットを3体以上揃えてシナジーを起動する")
+    if meeple_count > 0 and meeple_count < 3 and "meeple" in top_comp.id:
+        improvements.append("買う: ミープルを3体まで揃える")
 
     if board_strength < 55:
-        improvements.append("盤面強度が低め。構成の核となるユニットを優先的に揃える")
+        improvements.append("D: コア駒と前衛を揃える")
 
     if len(req.board) < req.level:
-        improvements.append(f"盤面が{len(req.board)}/{req.level}枚。空きスロットを埋める")
+        improvements.append(f"置く: 空きスロットを埋める（{len(req.board)}/{req.level}）")
 
     if req.streak <= 0:
-        improvements.append("ストリークを意識したロールorホールドを選択する")
+        improvements.append("判断: 勝ちに行くならD、貯めるならホールド")
 
     return improvements[:5]
 

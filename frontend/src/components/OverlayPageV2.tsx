@@ -933,7 +933,7 @@ export function OverlayPageV2() {
     ...situations.filter((item) => item.priority === "high"),
     ...situations.filter((item) => item.priority === "medium"),
   ];
-  const visibleSituations = detailsOpen ? orderedSituations : orderedSituations.slice(0, 2);
+  const visibleSituations = detailsOpen ? orderedSituations.slice(0, 5) : orderedSituations.slice(0, 3);
   const visibleShop = detailsOpen
     ? (result?.shopRecommendations ?? [])
     : (result?.shopRecommendations.slice(0, 3) ?? []);
@@ -1075,7 +1075,7 @@ export function OverlayPageV2() {
             <>
               {visibleSituations.length > 0 && (
                 <div className="v2-section">
-                  <div className="v2-sec-hdr">次にやること</div>
+                  <div className="v2-sec-hdr">今やること</div>
                   {visibleSituations.map((item, index) => (
                     <div
                       key={`${item.action}-${index}`}
@@ -1086,14 +1086,14 @@ export function OverlayPageV2() {
                         {item.priority === "urgent" ? "[Urgent] " : ""}
                         {item.action}
                       </div>
-                      {item.detail && <div className="v2-sit-detail">{item.detail}</div>}
+                      {detailsOpen && item.detail && <div className="v2-sit-detail">{item.detail}</div>}
                     </div>
                   ))}
                 </div>
               )}
 
               <div className="v2-section">
-                <div className="v2-sec-hdr">推奨構成</div>
+                <div className="v2-sec-hdr">狙う構成</div>
                 <div className="v2-comp-row">
                   {result.topComp.tier && (
                     <span
@@ -1115,9 +1115,11 @@ export function OverlayPageV2() {
               </div>
 
               <div className="v2-section v2-economy-section">
-                <div className="v2-sec-hdr">Economy</div>
+                <div className="v2-sec-hdr">レベル/リロール</div>
                 <div className="v2-economy-action">{result.economyPlan.action}</div>
-                {result.economyPlan.reason && <div className="v2-economy-reason">{result.economyPlan.reason}</div>}
+                {detailsOpen && result.economyPlan.reason && (
+                  <div className="v2-economy-reason">{result.economyPlan.reason}</div>
+                )}
               </div>
 
               {(shopHighlights.length > 0 || visibleShop.length > 0) && (
@@ -1178,14 +1180,14 @@ export function OverlayPageV2() {
 
               {result.itemPlan && (
                 <div className="v2-section">
-                  <div className="v2-sec-hdr">Item Plan</div>
+                  <div className="v2-sec-hdr">作るアイテム</div>
                   <div className="v2-item-plan">{result.itemPlan}</div>
                 </div>
               )}
 
               {visibleBoardAdvice.length > 0 && (
                 <div className="v2-section">
-                  <div className="v2-sec-hdr">Board Advice</div>
+                  <div className="v2-sec-hdr">集める/置く</div>
                   {visibleBoardAdvice.map((item, index) => (
                     <div
                       key={`${item.label}-${index}`}
@@ -1201,7 +1203,7 @@ export function OverlayPageV2() {
 
               {visibleCutCandidates.length > 0 && (
                 <div className="v2-section">
-                  <div className="v2-sec-hdr">Cut</div>
+                  <div className="v2-sec-hdr">外す候補</div>
                   {visibleCutCandidates.map((item, index) => (
                     <div key={`${item.name}-${index}`} className="v2-cut-item">
                       - {item.name}
@@ -1213,7 +1215,7 @@ export function OverlayPageV2() {
 
               {visibleNextImprovements.length > 0 && (
                 <div className="v2-section">
-                  <div className="v2-sec-hdr">Next</div>
+                  <div className="v2-sec-hdr">次の候補</div>
                   <ul className="v2-next-list">
                     {visibleNextImprovements.map((item, index) => (
                       <li key={`${item}-${index}`}>{item}</li>

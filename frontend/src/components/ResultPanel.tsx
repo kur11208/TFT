@@ -169,7 +169,7 @@ export function ResultPanel({ result, request, error, loading }: Props) {
       </section>
 
       <section className="result-section">
-        <h3>推奨構成</h3>
+        <h3>狙う構成</h3>
         <div className="comp-card-metatft">
           <div className="comp-card-header">
             <TierBadge tier={topComp.tier} />
@@ -238,7 +238,7 @@ export function ResultPanel({ result, request, error, loading }: Props) {
 
       {boardAdvice.length > 0 && (
         <section className="result-section">
-          <h3>配置・盤面アドバイス</h3>
+          <h3>集める/置く</h3>
           <ul className="board-advice-list">
             {boardAdvice.map((item, i) => <BoardAdviceRow key={i} item={item} />)}
           </ul>
@@ -255,7 +255,7 @@ export function ResultPanel({ result, request, error, loading }: Props) {
       )}
 
       <section className="result-section">
-        <h3>経済プラン</h3>
+        <h3>レベル/リロール判断</h3>
         <div className="economy-card">
           <span className="economy-action">{economyPlan.action}</span>
           <p className="economy-reason">{economyPlan.reason}</p>
@@ -329,7 +329,7 @@ export function ResultPanel({ result, request, error, loading }: Props) {
       )}
 
       <section className="result-section">
-        <h3>アイテム方針</h3>
+        <h3>作るアイテム</h3>
         <p className="item-plan-text">{itemPlan}</p>
       </section>
 
@@ -343,7 +343,7 @@ export function ResultPanel({ result, request, error, loading }: Props) {
 
       {nextImprovements.length > 0 && (
         <section className="result-section">
-          <h3>次の改善点</h3>
+          <h3>次の候補</h3>
           <ol className="improvement-list">
             {nextImprovements.map((tip, i) => <li key={i}>{tip}</li>)}
           </ol>

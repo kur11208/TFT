@@ -401,16 +401,16 @@ def _build_target_item_action(target: Dict[str, Any], *, primary: bool) -> Optio
     if primary and target["location"] == "bench":
         return {
             "priority": "high",
-            "action": f"{name}を盤面に出して主キャリー化",
-            "detail": f"現在 {current_text}。理想装備は {ideal_text}。",
+            "action": f"出す: {name}を盤面へ",
+            "detail": f"主キャリー。装備: {current_text} / 目標: {ideal_text}",
         }
 
     if target["ready_to_equip"]:
         item = target["ready_to_equip"][0]
         return {
             "priority": "high" if primary else "medium",
-            "action": f"{name}に{item}を載せる",
-            "detail": f"現在 {current_text}。手持ちの完成品をそのまま反映する。",
+            "action": f"装備: {name}に{item}",
+            "detail": f"手持ち完成品を載せる。現在: {current_text}",
         }
 
     if target["craftable_now"] and not target["slots_full"]:
@@ -418,8 +418,8 @@ def _build_target_item_action(target: Dict[str, Any], *, primary: bool) -> Optio
         parts_text = " + ".join(_display_item_name(part) for part in craft["components"])
         return {
             "priority": "high" if primary else "medium",
-            "action": f"{name}へ{craft['item']}を作る",
-            "detail": f"素材: {parts_text}。現在 {current_text}。",
+            "action": f"作る: {name}に{craft['item']}",
+            "detail": f"素材: {parts_text} / 現在: {current_text}",
         }
 
     next_goal = target["next_goal"]
@@ -427,20 +427,20 @@ def _build_target_item_action(target: Dict[str, Any], *, primary: bool) -> Optio
         parts = next_goal.get("components") or []
         if parts:
             parts_text = " + ".join(_display_item_name(part) for part in parts)
-            detail = f"{name}の理想装備は {ideal_text}。必要素材: {parts_text}。"
+            detail = f"必要素材: {parts_text} / 持たせ先: {name}"
         else:
-            detail = f"{name}の理想装備は {ideal_text}。"
+            detail = f"持たせ先: {name} / 目標: {ideal_text}"
         return {
             "priority": "high" if primary else "medium",
-            "action": f"次の素材は{next_goal['item']}狙い",
+            "action": f"素材: {next_goal['item']}を狙う",
             "detail": detail,
         }
 
     if primary and target["slots_full"] and target["missing_items"]:
         return {
             "priority": "medium",
-            "action": f"{name}の3枠は埋まり済み",
-            "detail": f"現在 {current_text}。残り素材は前衛か副キャリーへ回す。",
+            "action": "素材: 前衛か副キャリーへ回す",
+            "detail": f"{name}は3枠埋まり済み。現在: {current_text}",
         }
 
     return None
@@ -758,7 +758,7 @@ def calc_forge_choice(choices: List[str], held_items: List[str] = None, comp_id:
 
 # ---- 状況アドバイス ----
 
-def calc_situation_actions(state, comp_id: str = "") -> List[dict]:
+def calc_situation_actions(state, comp_id: str = "", board_strength: Optional[int] = None) -> List[dict]:
     """
     現在の状況に応じて「今やるべきこと」を優先度付きで返す。
     Returns List[{"priority": "urgent"|"high"|"medium", "action": str, "detail": str}]
@@ -784,53 +784,174 @@ def calc_situation_actions(state, comp_id: str = "") -> List[dict]:
     comp_name  = comp.get("name", "") if comp else ""
     play_style = comp.get("play_style", "") if comp else ""
     board_names = {u.name for u in board} if board else set()
+    bench_names = {u.name for u in bench} if bench else set()
+    shop_names = {u.name for u in getattr(state, "shop", [])} if getattr(state, "shop", []) else set()
     item_context = build_item_advice_context(state, comp_id) if comp else {}
+    needs_all_in = hp <= 40 and (board_strength is None or board_strength < 50)
+    needs_stabilize = hp <= 55 and (board_strength is None or board_strength < 55)
 
-    # ── 緊急: HP 低下 ──
-    if hp <= 20:
-        actions.append({
-            "priority": "urgent",
-            "action": "盤面を即強化 — 負けると脱落",
-            "detail": f"HP {hp}。ゴールドを全放出してでも強いユニットを買ってロールする。",
-        })
-    elif hp <= 40:
-        actions.append({
-            "priority": "urgent",
-            "action": "ロールして戦闘力を上げる",
-            "detail": f"HP {hp} — 危険域。あと2〜3敗で脱落圏。前衛を最低2体確保してから守りに入る。",
-        })
-
-    # ── 特殊ラウンド（優先表示）──
+    # ── 特殊ラウンド（最優先）──
     if _is_augment_round(stage):
         actions.append({
             "priority": "urgent",
-            "action": f"オーグメントを選ぶ（{stage}）",
-            "detail": "自動でオーグメント選択ウィンドウが開きます。3択の中から最適案を確認。",
+            "action": f"選ぶ: オーグメント（{stage}）",
+            "detail": "3択ウィンドウの推奨1位を取る。",
         })
     if _is_gods_round(stage):
         actions.append({
             "priority": "urgent",
-            "action": f"神のオファリングを選ぶ（{stage}）",
-            "detail": "同じ神を2回選ぶと神アラインが確定。構成との相性を神選択ツールで確認。",
+            "action": f"選ぶ: 神のオファリング（{stage}）",
+            "detail": "神選択ツールの推奨1位を取る。",
         })
     if _is_god_boon_round(stage):
         actions.append({
             "priority": "urgent",
-            "action": "God Boon を選ぶ（4-7）",
-            "detail": "アーモリーから大型報酬を1つ選択。神アラインと構成に合ったBoonを優先。",
+            "action": "選ぶ: God Boon（4-7）",
+            "detail": "神アラインと構成に合うBoonを取る。",
         })
 
-    # ── 盤面配置: 今レベルで何を出してどこに置くか ──
+    # ── 緊急: HP 低下 ──
+    if hp <= 20 or needs_all_in:
+        actions.append({
+            "priority": "urgent",
+            "action": "D: 全額ロールして即強化",
+            "detail": f"HP {hp}。買う: 2つ星候補・前衛・構成コア。",
+        })
+    elif needs_stabilize:
+        actions.append({
+            "priority": "high",
+            "action": "D: 20-30Gロール",
+            "detail": f"HP {hp}。前衛2体と2つ星を先に作る。",
+        })
+
     comp_units = comp.get("units", []) if comp else []
     carry_name = comp.get("carry", "") if comp else ""
 
+    # ── レベル・ロール判断（常に1つ表示）──
+    if needs_stabilize:
+        actions.append({
+            "priority": "medium",
+            "action": "安定後: レベル/貯金に戻す",
+            "detail": "勝てる盤面になったらDを止める。",
+        })
+    elif "Fast 9" in play_style or "fast9" in comp_id:
+        if level < 9:
+            if hp <= 40:
+                actions.append({
+                    "priority": "high",
+                    "action": "安定後: 50G維持でLv9へ",
+                    "detail": "まずHPを守る。勝てる盤面になったらDを止めてEに回す。",
+                })
+            else:
+                actions.append({
+                    "priority": "high",
+                    "action": "E: 50G維持でLv9へ",
+                    "detail": "Dは押さない。余りゴールドを経験値に回す。",
+                })
+        else:
+            actions.append({
+                "priority": "high",
+                "action": "D: Lv9で高コストを探す",
+                "detail": "4・5コストを引いて完成盤面に寄せる。",
+            })
+    elif "リロール" in play_style:
+        if level < min_level:
+            actions.append({
+                "priority": "high",
+                "action": f"E: Lv{min_level}まで上げる",
+                "detail": f"あと{max(0, min_level - level)}レベル。到達後にDで3つ星を狙う。",
+            })
+        elif gold >= 50:
+            actions.append({
+                "priority": "high",
+                "action": "D: 50G維持でスローリロール",
+                "detail": "毎ラウンド余剰分だけ回して3つ星を狙う。",
+            })
+        elif hp <= 40:
+            actions.append({
+                "priority": "high",
+                "action": "D: 30Gまでロール",
+                "detail": "HPが低いので利子より盤面を優先。",
+            })
+        else:
+            actions.append({
+                "priority": "high",
+                "action": "貯金: 50Gまで待つ",
+                "detail": "50G到達後にスローリロールへ入る。",
+            })
+    else:
+        if level < min_level:
+            actions.append({
+                "priority": "high",
+                "action": f"E: Lv{min_level}へ上げる",
+                "detail": f"{comp_name or '狙う構成'}はLv{min_level}から完成を狙う。",
+            })
+        elif major >= 3:
+            actions.append({
+                "priority": "high",
+                "action": f"D: Lv{level}で20-30Gロール",
+                "detail": f"{comp_name or '狙う構成'}のコアを揃えたら止める。",
+            })
+        else:
+            early = comp.get("early_board", []) if comp else []
+            missing_early = [u for u in early if u not in board_names][:3]
+            if missing_early:
+                actions.append({
+                    "priority": "medium",
+                    "action": f"買う: {'・'.join(missing_early)}",
+                    "detail": "序盤ボード用。Dは押さずショップで見えたら買う。",
+                })
+            else:
+                actions.append({
+                    "priority": "medium",
+                    "action": "貯金: 10/20/30Gの利子を作る",
+                    "detail": "序盤盤面は足りている。Dは押さない。",
+                })
+
+    carry_item_action = _build_target_item_action(item_context.get("carry", {}), primary=True)
+    if carry_item_action:
+        actions.append(carry_item_action)
+
+    tank_item_action = _build_target_item_action(item_context.get("tank", {}), primary=False)
+    carry_state = item_context.get("carry", {})
+    if tank_item_action and (
+        not carry_state
+        or carry_state.get("slots_full")
+        or not carry_state.get("missing_items")
+    ):
+        actions.append(tank_item_action)
+
+    # ── 買う/探す駒 ──
+    key_units = [u["name"] for u in comp_units if u.get("stars", 2) >= 2]
+    shop_targets = [u for u in key_units if u in shop_names and u not in board_names][:3]
+    bench_targets = [u for u in key_units if u in bench_names and u not in board_names][:3]
+    missing_keys = [u for u in key_units if u not in board_names][:3]
+
+    if shop_targets:
+        actions.append({
+            "priority": "high",
+            "action": f"買う: {'・'.join(shop_targets)}",
+            "detail": f"{comp_name or '狙う構成'}のコア。見えているうちに購入。",
+        })
+    elif bench_targets:
+        actions.append({
+            "priority": "high",
+            "action": f"出す: {'・'.join(bench_targets)}",
+            "detail": "ベンチのコア駒を盤面に反映する。",
+        })
+    elif missing_keys:
+        actions.append({
+            "priority": "high",
+            "action": f"探す: {'・'.join(missing_keys)}",
+            "detail": "ショップに出たら買う。D中はこの駒を優先。",
+        })
+
+    # ── 盤面配置: 今レベルで何を出してどこに置くか ──
     if comp_units:
-        # レベル分のスロットに入れるユニットを選択
         ideal = comp_units[:level]
         front_board = [u["name"] for u in ideal if u.get("position") == "frontline"]
         back_board  = [u["name"] for u in ideal if u.get("position") != "frontline"]
 
-        # 前衛が0体なら最初の frontline ユニットをスワップ
         if not front_board:
             all_fl = [u["name"] for u in comp_units if u.get("position") == "frontline"]
             if all_fl:
@@ -849,119 +970,31 @@ def calc_situation_actions(state, comp_id: str = "") -> List[dict]:
         detail_bench = f"ベンチ待機: {'・'.join(bench_now)}" if bench_now else ""
 
         actions.append({
-            "priority": "high",
-            "action": f"Lv{level}盤面: {' / '.join(parts)}",
-            "detail": detail_carry + detail_bench,
+            "priority": "medium",
+            "action": f"置く: {' / '.join(parts)}",
+            "detail": " ".join(part for part in [detail_carry, detail_bench] if part),
         })
-
-    carry_item_action = _build_target_item_action(item_context.get("carry", {}), primary=True)
-    if carry_item_action:
-        actions.append(carry_item_action)
-
-    tank_item_action = _build_target_item_action(item_context.get("tank", {}), primary=False)
-    carry_state = item_context.get("carry", {})
-    if tank_item_action and (
-        not carry_state
-        or carry_state.get("slots_full")
-        or not carry_state.get("missing_items")
-    ):
-        actions.append(tank_item_action)
-
-    # ── 探すべきキーユニット ──
-    key_units = [u["name"] for u in comp_units if u.get("stars", 2) >= 2]
-    missing_keys = [u for u in key_units if u not in board_names][:3]
-    if missing_keys:
-        actions.append({
-            "priority": "high",
-            "action": f"ショップで探す: {'・'.join(missing_keys)}",
-            "detail": f"出たら即買い。[D]でリロール。{comp_name}のコアユニット。",
-        })
-    elif key_units:
-        actions.append({
-            "priority": "high",
-            "action": f"{'・'.join(key_units[:2])} を2つ星に",
-            "detail": "同名ユニットをあと1〜2枚引いて2つ星へ。ショップを流して引きを待つ。",
-        })
-
-    # ── レベル・ロール判断（常に1つ表示）──
-    if "Fast 9" in play_style or "fast9" in comp_id:
-        if level < 9:
-            actions.append({
-                "priority": "high",
-                "action": f"[E]でLv{level}→9へ経験値購入を続ける",
-                "detail": "Fast9はGold50をキープしながら毎ラウンドEを押してLv9を目指す。ロールはしない。",
-            })
-        else:
-            actions.append({
-                "priority": "high",
-                "action": "Lv9でロール — 高コストユニットを引く",
-                "detail": "Lv9ならコスト4・5のユニット出現率UP。50g貯まるまで待たずロール開始してOK。",
-            })
-    elif "リロール" in play_style:
-        if level < min_level:
-            actions.append({
-                "priority": "high",
-                "action": f"[E]でLv{min_level}まで経験値購入（あと{min_level - level}回）",
-                "detail": f"リロール構成はLv{min_level}に到達してから一気にロールする。今はEキーを押す。",
-            })
-        else:
-            actions.append({
-                "priority": "high",
-                "action": f"Lv{min_level}でリロール — 3つ星を目指す",
-                "detail": "[D]キーでショップを流す。30g以下になったら一旦止めて次のラウンドのゴールドを待つ。",
-            })
-    else:
-        # 通常後期ロール構成
-        if level < min_level:
-            actions.append({
-                "priority": "high",
-                "action": f"[E]でLv{min_level}へ（あと{min_level - level}回）",
-                "detail": f"{comp_name}の完成にはLv{min_level}必要。4gずつ[E]を押してレベルアップ。",
-            })
-        elif major >= 3:
-            actions.append({
-                "priority": "high",
-                "action": f"Lv{level}でロールして{comp_name}を完成させる",
-                "detail": "[D]キーでリロール。20〜30g使ってキーユニットを揃えたら一旦止めてゴールドを貯める。",
-            })
-        else:
-            # 序盤（ステージ1〜2）
-            early = comp.get("early_board", []) if comp else []
-            if early:
-                missing_early = [u for u in early if u not in board_names][:3]
-                if missing_early:
-                    actions.append({
-                        "priority": "medium",
-                        "action": f"序盤盤面を固める: {'・'.join(missing_early)} を狙う",
-                        "detail": f"{comp_name}の序盤ボード。強い盤面でラウンドをこなしながらゴールドを貯める。",
-                    })
-                else:
-                    actions.append({
-                        "priority": "medium",
-                        "action": "序盤盤面が整っています — ゴールドを貯める",
-                        "detail": "序盤ボードOK。ロールせずインタレスト（10g毎+1g）を積んで中盤に備える。",
-                    })
 
     # ── 連勝/連敗ストリーク維持 ──
     if streak >= 3:
         actions.append({
             "priority": "medium",
-            "action": f"{streak}連勝中 — 盤面を変えない",
-            "detail": "ストリーク維持が重要。必要でないロールや売却は避けてボーナスを守る。",
+            "action": f"維持: {streak}連勝盤面を崩さない",
+            "detail": "不要な売却・ロールはしない。",
         })
     elif streak <= -3:
         actions.append({
             "priority": "medium",
-            "action": f"{abs(streak)}連敗中 — 連敗ボーナスを活用",
-            "detail": "連敗ボーナスゴールドが加算されている。HPが許す限り意図的に負けてゴールドを貯める戦略も有効。",
+            "action": f"維持: {abs(streak)}連敗ボーナス",
+            "detail": "HPに余裕があるなら無理に勝ちに行かない。",
         })
 
     # ── アイテム未装備 ──
     if len(items_held) >= 2 and not carry_item_action and not tank_item_action:
         actions.append({
             "priority": "medium",
-            "action": f"素材アイテム{len(items_held)}個をキャリーに装備",
-            "detail": "アイテム未装備は戦闘力ロス。金床ツールで最適な完成アイテムを確認して装備。",
+            "action": f"作る: 素材{len(items_held)}個を消化",
+            "detail": "キャリー用完成品を作る。迷うなら金床ツールを見る。",
         })
 
     # ── 優先度ソート・重複除去 ──
@@ -977,7 +1010,7 @@ def calc_situation_actions(state, comp_id: str = "") -> List[dict]:
         seen_actions.add(key)
         deduped.append(action)
 
-    return deduped[:6]
+    return deduped[:5]
 
 
 def calc_gods_choice(
