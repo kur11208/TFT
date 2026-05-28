@@ -434,7 +434,7 @@ def capture_game_state(existing: Optional[AnalyzeRequest] = None, *, fast: bool 
                         confidence,
                         group="board",
                         min_conf=0.74,
-                        min_margin=0.0,
+                        min_margin=0.01,
                     )
                 else:
                     unit = (
@@ -464,7 +464,7 @@ def capture_game_state(existing: Optional[AnalyzeRequest] = None, *, fast: bool 
                     confidence,
                     group="bench",
                     min_conf=0.74,
-                    min_margin=0.0,
+                    min_margin=0.01,
                 )
             else:
                 unit = (

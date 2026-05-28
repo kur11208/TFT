@@ -59,6 +59,11 @@ def _imread_any(path: Path) -> Optional[np.ndarray]:
     return cv2.imdecode(buf, cv2.IMREAD_COLOR)
 
 
+def _image_fingerprint(bgr: np.ndarray) -> bytes:
+    img = _prepare_image(bgr)
+    return img.tobytes()
+
+
 def extract_slot_features(bgr: np.ndarray) -> np.ndarray:
     """
     Build a compact feature vector from an in-game slot crop.
@@ -178,7 +183,7 @@ def match_slot_unit(
     min_conf: float = 0.72,
     min_margin: float = 0.03,
     min_presence: float = 0.08,
-    empty_margin: float = 0.02,
+    empty_margin: float = 0.01,
 ) -> tuple[Optional[str], float]:
     """
     Return (champion_name, similarity) for a board/bench crop.
@@ -264,9 +269,19 @@ def build_slot_model(samples_root: str | os.PathLike[str], output_path: str | os
     model: dict[str, dict[str, dict[str, list[list[float]] | list[float] | int]]] = {}
     for group in groups_to_use:
         vectors_by_label: dict[str, list[np.ndarray]] = {}
+        loaded_images: list[tuple[str, Path, np.ndarray, bytes]] = []
+        labels_by_fingerprint: dict[bytes, set[str]] = {}
+
         for label, image_path in _iter_label_images(root / group):
             img = _imread_any(image_path)
             if img is None:
+                continue
+            fingerprint = _image_fingerprint(img)
+            loaded_images.append((label, image_path, img, fingerprint))
+            labels_by_fingerprint.setdefault(fingerprint, set()).add(label)
+
+        for label, _image_path, img, fingerprint in loaded_images:
+            if len(labels_by_fingerprint.get(fingerprint, set())) > 1:
                 continue
             for variant in _augment_images(img):
                 vectors_by_label.setdefault(label, []).append(extract_slot_features(variant))

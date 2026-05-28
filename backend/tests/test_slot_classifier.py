@@ -89,6 +89,22 @@ class SlotClassifierTests(unittest.TestCase):
                 slot_classifier._MODEL_PATH = original_path
                 slot_classifier.reload()
 
+    def test_conflicting_duplicate_samples_are_ignored(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            samples = root / "samples"
+            model_path = root / "slot_model.json"
+
+            self._write_sample(samples / "board" / "alpha" / "a1.png", (40, 80, 220))
+            self._write_sample(samples / "board" / "__empty__" / "e1.png", (40, 80, 220))
+            self._write_sample(samples / "board" / "beta" / "b1.png", (220, 80, 30))
+
+            model = slot_classifier.build_slot_model(samples, model_path)
+
+            self.assertNotIn("alpha", model["board"])
+            self.assertNotIn("__empty__", model["board"])
+            self.assertIn("beta", model["board"])
+
 
 if __name__ == "__main__":
     unittest.main()
