@@ -231,7 +231,7 @@ curl -X POST http://127.0.0.1:8010/analyze \
 - カスタムポートを使う場合は、起動前に `TFT_ALLOWED_ORIGINS` に**信頼できる正確なOrigin**をカンマ区切りで設定してください。例：`http://127.0.0.1:5174`。ワイルドカードは設定しないでください。
 - `file://` / Overwolfの拡張ページが `Origin: null` を送信する構成では、既定で通信を拒否します。どうしても必要な場合に限り、**信頼できるローカル環境だけ**で `TFT_ALLOW_OPAQUE_ORIGIN=1` を設定してからバックエンドを起動してください。これにより他の不透明なOriginも区別できなくなるため、通常は無効のままにしてください。
 - フロントエンドの `?apiBase=` に外部URLを指定しても採用されません。ゲーム情報や画面データの外部送信を防止するための制限です。
-- 更新したPython依存関係は `cd backend && python -m pip install -r requirements.txt` で反映してください。特にPillowは脆弱性対応版（12.1.1）です。
+- 更新したPython依存関係は `cd backend && python -m pip install -r requirements.txt` で反映してください。FastAPI・Pydantic・Requestsも合わせて更新し、Pillowは脆弱性対応版（13.0.0）です。
 - Electronのサポート対象版へのアップグレードは別途Windows UI検証が必要です。パッケージ更新時はNode.js 22.12以降を使い、`overlay_app` で `npm ci` を実行してください。
 
 コードを変更しただけでは、起動中のローカルアプリに反映されません。依存更新後にバックエンド・フロントエンド・オーバーレイを再起動してください。
