@@ -1,13 +1,13 @@
-fastapi==0.111.0
+fastapi==0.162.0
 uvicorn[standard]==0.29.0
 pydantic==2.7.1
 # --- screen capture & OCR ---
 mss==9.0.1
 pytesseract==0.3.13
 opencv-python==4.9.0.80
-Pillow==12.1.1
+Pillow==13.0.0
 numpy>=1.24.0,<2.0
 # --- process watcher ---
 psutil==5.9.8
 # --- LCU API client ---
-requests==2.32.3
+requests==2.34.2
