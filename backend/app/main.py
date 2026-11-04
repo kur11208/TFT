@@ -1,11 +1,13 @@
 import asyncio
 import json
+import os
 import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 from pydantic import BaseModel
 
 from .schemas import (
@@ -254,12 +256,48 @@ class AutoScreenshotConfig(BaseModel):
     only_normal: Optional[bool] = None
     only_in_game: Optional[bool] = None
 
+# Allow only the two local development origins by default.
+# Overwolf/file:// uses an opaque (null) Origin. Enabling that mode intentionally
+# requires explicit opt-in; it weakens browser-origin isolation.
+_ALLOWED_ORIGINS = {
+    "http://127.0.0.1:5173",
+    "http://localhost:5173",
+    "http://[::1]:5173",
+    "http://127.0.0.1:8010",
+    "http://localhost:8010",
+    "http://[::1]:8010",
+}
+_ALLOWED_ORIGINS.update(
+    value.strip()
+    for value in os.getenv("TFT_ALLOWED_ORIGINS", "").split(",")
+    if value.strip()
+)
+if os.getenv("TFT_ALLOW_OPAQUE_ORIGIN", "").strip() == "1":
+    _ALLOWED_ORIGINS.add("null")
+
+app.add_middleware(
+    TrustedHostMiddleware,
+    allowed_hosts=["localhost", "127.0.0.1", "[::1]", "testserver"],
+)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=sorted(_ALLOWED_ORIGINS),
+    allow_methods=["GET", "POST", "PUT", "OPTIONS"],
+    allow_headers=["Content-Type"],
 )
+
+
+@app.middleware("http")
+async def reject_untrusted_browser_origins(request: Request, call_next):
+    # CORS alone does not block cross-origin side effects (CSRF).
+    origin = request.headers.get("origin")
+    fetch_site = request.headers.get("sec-fetch-site", "")
+    if (origin is not None and origin not in _ALLOWED_ORIGINS) or (
+        origin is None and fetch_site == "cross-site"
+    ):
+        return JSONResponse({"detail": "Untrusted browser origin"}, status_code=403)
+    return await call_next(request)
+
 
 
 @app.get("/health")
