@@ -10,4 +10,4 @@ numpy>=1.24.0,<2.0
 # --- process watcher ---
 psutil==5.9.8
 # --- LCU API client ---
-requests==2.32.3
+requests==2.34.2
