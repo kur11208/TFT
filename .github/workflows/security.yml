@@ -42,7 +42,19 @@ jobs:
           python-version: "3.11"
       - name: Check Python source
         run: python -m compileall -q backend/app
-      - name: Audit Python package requirements
+      - name: Install and audit Python package requirements
         run: |
-          python -m pip install pip-audit==2.10.1
+          python -m pip install -r backend/requirements.txt
+          python -m pip install pip-audit==2.10.1 httpx==0.28.1
           python -m pip_audit -r backend/requirements.txt
+      - name: Import and smoke-test API origin defenses
+        run: |
+          PYTHONPATH=backend python - <<'PY'
+          from fastapi.testclient import TestClient
+          from app.main import app
+          client = TestClient(app)
+          assert client.get("/health", headers={"host": "127.0.0.1"}).status_code == 200
+          assert client.get("/health", headers={"host": "127.0.0.1", "origin": "https://example.com"}).status_code == 403
+          assert client.get("/health", headers={"host": "not-local.example"}).status_code == 400
+          print("API import, health and origin/host checks passed")
+          PY
