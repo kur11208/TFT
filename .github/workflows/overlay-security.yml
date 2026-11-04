@@ -1,0 +1,33 @@
+name: Electron overlay dependency security
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  overlay:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: overlay_app
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: overlay_app/package-lock.json
+      - name: Verify reproducible lockfile
+        run: npm ci --ignore-scripts
+      - name: Audit production dependencies
+        run: npm audit --omit=dev
+      - name: Static JavaScript syntax
+        run: |
+          node --check main.js
+          node --check preload.js
