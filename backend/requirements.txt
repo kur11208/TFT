@@ -5,7 +5,7 @@ pydantic==2.7.1
 mss==9.0.1
 pytesseract==0.3.13
 opencv-python==4.9.0.80
-Pillow==10.3.0
+Pillow==12.1.1
 numpy>=1.24.0,<2.0
 # --- process watcher ---
 psutil==5.9.8
